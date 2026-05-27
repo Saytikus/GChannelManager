@@ -20,6 +20,8 @@ struct GatewayStats {
     quint64 suspensions        = 0;   // переходов Active/Establishing -> Suspended
     quint64 droppedReplies     = 0;   // Reply без сопоставленного pending
     quint64 dataReceived       = 0;   // несвязанных Data-сообщений
+    quint64 incomingRequests   = 0;   // Request-кадров от узла
+    quint64 cachedRepliesResent = 0;  // ответов, повторно отправленных из кэша
 };
 
 Q_DECLARE_METATYPE(GatewayStats)

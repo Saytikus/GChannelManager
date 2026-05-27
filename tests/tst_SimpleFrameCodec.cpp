@@ -7,6 +7,8 @@ class TestSimpleFrameCodec : public QObject
     Q_OBJECT
 private slots:
     void encodeRequest_roundtrip();
+    void incomingRequestFrame_classifiedAsTypeRequest();
+    void encodeReply_carriesCorrelation();
     void encodeData_carriesNoCorrelation();
     void encodeKeepAlive_classifiedAsKeepAliveReplyOnly();
     void feed_splitAcrossCalls_buffered();
@@ -36,6 +38,33 @@ void TestSimpleFrameCodec::encodeRequest_roundtrip()
     QVERIFY(frame.size() >= 10);
     QCOMPARE(quint8(frame[0]), quint8(0xA5));
     QCOMPARE(quint8(frame[1]), quint8(SimpleFrameCodec::Request));
+}
+
+void TestSimpleFrameCodec::incomingRequestFrame_classifiedAsTypeRequest()
+{
+    SimpleFrameCodec codec;
+    // Узел шлёт нам Request — feed() должен классифицировать его как Type::Request,
+    // не как Unknown (ранее библиотека была чисто клиентом и игнорировала такие кадры).
+    const QByteArray frame = SimpleFrameCodec::makeFrame(SimpleFrameCodec::Request, 7,
+                                                         QByteArray("DO_IT"));
+    const auto msgs = codec.feed(frame);
+    QCOMPARE(msgs.size(), size_t(1));
+    QCOMPARE(msgs[0].type, DecodedMessage::Type::Request);
+    QCOMPARE(msgs[0].correlationId, quint32(7));
+    QCOMPARE(msgs[0].payload, QByteArray("DO_IT"));
+}
+
+void TestSimpleFrameCodec::encodeReply_carriesCorrelation()
+{
+    SimpleFrameCodec codec;
+    const QByteArray frame = codec.encodeReply(13, QByteArray("OK"));
+    QCOMPARE(quint8(frame[1]), quint8(SimpleFrameCodec::Reply));
+
+    const auto msgs = codec.feed(frame);
+    QCOMPARE(msgs.size(), size_t(1));
+    QCOMPARE(msgs[0].type, DecodedMessage::Type::Reply);
+    QCOMPARE(msgs[0].correlationId, quint32(13));
+    QCOMPARE(msgs[0].payload, QByteArray("OK"));
 }
 
 void TestSimpleFrameCodec::encodeData_carriesNoCorrelation()

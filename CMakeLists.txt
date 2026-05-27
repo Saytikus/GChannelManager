@@ -20,6 +20,7 @@ set(GCM_PUBLIC_HEADERS
     include/GChannelManager/DecodedMessage.h
     include/GChannelManager/RetryPolicy.h
     include/GChannelManager/KeepAliveConfig.h
+    include/GChannelManager/ReplyCacheConfig.h
     include/GChannelManager/IMessageCodec.h
     include/GChannelManager/ITransport.h
     include/GChannelManager/GatewayRequest.h

@@ -35,6 +35,11 @@ QByteArray SimpleFrameCodec::encodeRequest(quint32 correlationId, const QByteArr
     return makeFrame(Request, correlationId, payload);
 }
 
+QByteArray SimpleFrameCodec::encodeReply(quint32 correlationId, const QByteArray &payload)
+{
+    return makeFrame(Reply, correlationId, payload);
+}
+
 QByteArray SimpleFrameCodec::encodeData(const QByteArray &payload)
 {
     return makeFrame(Data, 0, payload);   // корреляция не нужна
@@ -78,10 +83,11 @@ std::vector<DecodedMessage> SimpleFrameCodec::feed(const QByteArray &bytes)
         m.correlationId = f.corrId;
         m.payload       = f.payload;
         switch (f.type) {
+        case Request:        m.type = DecodedMessage::Type::Request;   break;
         case Reply:          m.type = DecodedMessage::Type::Reply;     break;
         case KeepAliveReply: m.type = DecodedMessage::Type::KeepAlive; break;
         case Data:           m.type = DecodedMessage::Type::Data;      break;
-        default:             m.type = DecodedMessage::Type::Unknown;   break;
+        default:             m.type = DecodedMessage::Type::Unknown;   break;   // KeepAliveReq и пр.
         }
         out.push_back(std::move(m));
     }

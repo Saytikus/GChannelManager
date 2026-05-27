@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QByteArray>
+#include <QCache>
 #include <QHash>
 #include <QObject>
 #include <chrono>
@@ -11,6 +13,7 @@
 #include "IMessageCodec.h"
 #include "ITransport.h"
 #include "KeepAliveConfig.h"
+#include "ReplyCacheConfig.h"
 #include "RetryPolicy.h"
 
 class QTimer;
@@ -46,8 +49,9 @@ public:
     Q_ENUM(SessionState)
 
     // Сохраняем привычные имена `Gateway::RetryPolicy` / `Gateway::KeepAliveConfig`.
-    using RetryPolicy     = ::RetryPolicy;
-    using KeepAliveConfig = ::KeepAliveConfig;
+    using RetryPolicy      = ::RetryPolicy;
+    using KeepAliveConfig  = ::KeepAliveConfig;
+    using ReplyCacheConfig = ::ReplyCacheConfig;
 
     explicit Gateway(QObject *parent = nullptr);
     ~Gateway() override;
@@ -69,6 +73,14 @@ public:
     void setKeepAliveConfig(const KeepAliveConfig &k);
     [[nodiscard]] KeepAliveConfig keepAliveConfig() const { return m_keepAlive; }
     [[nodiscard]] bool isKeepAliveEnabled() const { return m_keepAlive.enabled; }
+
+    // Кэш ответов на входящие запросы — для повторов от узла.
+    // Изменения применяются немедленно: выключение очищает кэш,
+    // изменение maxEntries делает ресайз с LRU-эвикцией.
+    void setReplyCacheConfig(const ReplyCacheConfig &c);
+    [[nodiscard]] ReplyCacheConfig replyCacheConfig() const { return m_replyCacheConfig; }
+    [[nodiscard]] bool isReplyCacheEnabled() const { return m_replyCacheConfig.enabled; }
+    void clearReplyCache();
 
     // ---- состояния ----
     [[nodiscard]] ChannelState channelState()  const { return m_channel; }
@@ -95,6 +107,13 @@ public slots:
     // keep-alive on/off в работающей сессии (как кнопка)
     void setKeepAliveEnabled(bool enabled);
 
+    // кэш ответов on/off в работающей сессии
+    void setReplyCacheEnabled(bool enabled);
+
+    // ответ на входящий запрос (см. requestReceived). Возвращает true,
+    // если кадр поставлен в очередь транспорта.
+    bool reply(quint32 correlationId, const QByteArray &response);
+
     // сбросить все счётчики статистики в 0
     void resetStats();
 
@@ -110,9 +129,12 @@ signals:
     void channelStateChanged(Gateway::ChannelState state);
     void sessionStateChanged(Gateway::SessionState state);
     void keepAliveEnabledChanged(bool enabled);
+    void replyCacheEnabledChanged(bool enabled);
     void errorOccurred(const QString &message);
     void dataReceived(const QByteArray &payload);   // некоррелированные данные (push)
-    void statsUpdated(GatewayStats stats);          // периодический снимок счётчиков
+    void requestReceived(quint32 correlationId,
+                         const QByteArray &payload); // входящий запрос от узла
+    void statsUpdated(GatewayStats stats);           // периодический снимок счётчиков
 
 private:
     struct Pending {
@@ -167,4 +189,7 @@ private:
     GatewayStats              m_stats{};
     QTimer                   *m_statsTimer = nullptr;
     std::chrono::milliseconds m_statsInterval{0};   // 0 = периодический эмит выключен
+
+    ReplyCacheConfig          m_replyCacheConfig{};
+    QCache<quint32, QByteArray> m_replyCache{m_replyCacheConfig.maxEntries};
 };

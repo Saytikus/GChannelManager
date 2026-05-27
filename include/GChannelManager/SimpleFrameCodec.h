@@ -25,6 +25,8 @@ public:
 
     [[nodiscard]] QByteArray encodeRequest(quint32 correlationId,
                                            const QByteArray &payload) override;
+    [[nodiscard]] QByteArray encodeReply(quint32 correlationId,
+                                         const QByteArray &payload) override;
     [[nodiscard]] QByteArray encodeData(const QByteArray &payload) override;
     [[nodiscard]] QByteArray encodeKeepAlive() override;
     [[nodiscard]] std::vector<DecodedMessage> feed(const QByteArray &bytes) override;

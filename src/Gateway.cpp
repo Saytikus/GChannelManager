@@ -225,6 +225,20 @@ void Gateway::onTransportBytes(const QByteArray &bytes)
                 emit dataReceived(msg.payload);   // ответ без ожидающего запроса
             }
             break;
+        case DecodedMessage::Type::Request:
+            m_stats.incomingRequests += 1;
+            if (m_replyCacheConfig.enabled && m_transport && m_transport->isOpen()) {
+                if (const QByteArray *cached = m_replyCache.object(msg.correlationId)) {
+                    // узел повторил уже отвеченный запрос — отправим сохранённый ответ,
+                    // requestReceived НЕ эмитим, чтобы команду не выполнили повторно.
+                    m_transport->send(*cached);
+                    m_stats.sentBytes          += quint64(cached->size());
+                    m_stats.cachedRepliesResent += 1;
+                    break;
+                }
+            }
+            emit requestReceived(msg.correlationId, msg.payload);
+            break;
         case DecodedMessage::Type::KeepAlive:
             onKeepAliveReply();
             break;
@@ -236,6 +250,66 @@ void Gateway::onTransportBytes(const QByteArray &bytes)
             break;
         }
     }
+}
+
+// ---------------------------------------------------------------------
+//  Ответ на входящий запрос + кэш ответов
+// ---------------------------------------------------------------------
+bool Gateway::reply(quint32 correlationId, const QByteArray &response)
+{
+    if (!m_codec) {
+        emit errorOccurred(QStringLiteral("reply: кодек не установлен"));
+        return false;
+    }
+    if (!isChannelEnabled()) {
+        emit errorOccurred(QStringLiteral("reply: канал не включён"));
+        return false;
+    }
+    if (m_session == SessionState::Idle || m_session == SessionState::Stopping) {
+        emit errorOccurred(QStringLiteral("reply: сессия не активна"));
+        return false;
+    }
+    if (!m_transport || !m_transport->isOpen()) {
+        emit errorOccurred(QStringLiteral("reply: транспорт закрыт"));
+        return false;
+    }
+    const QByteArray frame = m_codec->encodeReply(correlationId, response);
+    if (m_transport->send(frame) < 0)
+        return false;
+
+    m_stats.sentBytes += quint64(frame.size());
+    if (m_replyCacheConfig.enabled)
+        m_replyCache.insert(correlationId, new QByteArray(frame));
+    return true;
+}
+
+void Gateway::setReplyCacheConfig(const ReplyCacheConfig &c)
+{
+    const bool wasEnabled = m_replyCacheConfig.enabled;
+    const auto oldMax     = m_replyCacheConfig.maxEntries;
+    m_replyCacheConfig    = c;
+
+    if (oldMax != c.maxEntries)
+        m_replyCache.setMaxCost(c.maxEntries);
+    if (wasEnabled && !c.enabled)
+        m_replyCache.clear();   // disabled → освобождаем
+
+    if (wasEnabled != c.enabled)
+        emit replyCacheEnabledChanged(c.enabled);
+}
+
+void Gateway::setReplyCacheEnabled(bool enabled)
+{
+    if (m_replyCacheConfig.enabled == enabled)
+        return;
+    ReplyCacheConfig c = m_replyCacheConfig;
+    c.enabled = enabled;
+    setReplyCacheConfig(c);
+}
+
+void Gateway::clearReplyCache()
+{
+    m_replyCache.clear();
 }
 
 // ---------------------------------------------------------------------

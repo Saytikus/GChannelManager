@@ -25,6 +25,11 @@ public:
     [[nodiscard]] virtual QByteArray encodeRequest(quint32 correlationId,
                                                    const QByteArray &payload) = 0;
 
+    // Упаковать ответ на входящий запрос — корреляция совпадает с запросом.
+    // Используется Gateway::reply().
+    [[nodiscard]] virtual QByteArray encodeReply(quint32 correlationId,
+                                                 const QByteArray &payload) = 0;
+
     // Упаковать "несвязанные" данные (fire-and-forget): корреляция не нужна,
     // ответа не ожидается. Используется Gateway::send().
     [[nodiscard]] virtual QByteArray encodeData(const QByteArray &payload) = 0;

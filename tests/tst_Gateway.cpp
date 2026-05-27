@@ -67,6 +67,11 @@ private slots:
     void stats_droppedReplyCounted();
     void stats_periodicSignalFires_andStopsOnZeroInterval();
     void stats_resetClearsCounters();
+    void incomingRequest_emitsRequestReceived();
+    void reply_sendsReplyFrameViaTransport();
+    void replyCache_disabled_emitsSignalOnEveryRequest();
+    void replyCache_enabled_resendsCachedReplyWithoutEmittingSignal();
+    void replyCache_disableClearsExistingEntries();
 };
 
 void TestGateway::channelEnable_emitsStateAndOpensTransport()
@@ -365,6 +370,147 @@ void TestGateway::stats_resetClearsCounters()
     QCOMPARE(s.keepAlivesSent,     quint64(0));
     QCOMPARE(s.keepAlivesReceived, quint64(0));
     QCOMPARE(s.requestsSent,       quint64(0));
+}
+
+// ---------------------------------------------------------------------
+//  Входящие запросы и кэш ответов
+// ---------------------------------------------------------------------
+void TestGateway::incomingRequest_emitsRequestReceived()
+{
+    Gateway gw;
+    auto *t = wireUp(gw);
+    gw.enableChannel();
+    gw.startSession();
+    replyKeepAlive(t);
+
+    QSignalSpy spy(&gw, &Gateway::requestReceived);
+    t->simulateReceive(SimpleFrameCodec::makeFrame(SimpleFrameCodec::Request, 42,
+                                                   QByteArray("DO_IT")));
+
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.first().at(0).value<quint32>(), quint32(42));
+    QCOMPARE(spy.first().at(1).toByteArray(), QByteArray("DO_IT"));
+    QCOMPARE(gw.stats().incomingRequests, quint64(1));
+}
+
+void TestGateway::reply_sendsReplyFrameViaTransport()
+{
+    Gateway gw;
+    auto *t = wireUp(gw);
+    gw.enableChannel();
+    gw.startSession();
+    replyKeepAlive(t);
+    t->clearSent();
+
+    QVERIFY(gw.reply(7, QByteArray("DONE")));
+    QCOMPARE(t->sent().size(), 1);
+
+    QByteArray buf = t->sent().first();
+    auto frames = SimpleFrameCodec::parse(buf);
+    QCOMPARE(frames.size(), size_t(1));
+    QCOMPARE(frames[0].type,    quint8(SimpleFrameCodec::Reply));
+    QCOMPARE(frames[0].corrId,  quint32(7));
+    QCOMPARE(frames[0].payload, QByteArray("DONE"));
+}
+
+void TestGateway::replyCache_disabled_emitsSignalOnEveryRequest()
+{
+    Gateway gw;
+    auto *t = wireUp(gw);
+    // По умолчанию кэш выключен.
+    QVERIFY(!gw.isReplyCacheEnabled());
+
+    gw.enableChannel();
+    gw.startSession();
+    replyKeepAlive(t);
+
+    QSignalSpy spy(&gw, &Gateway::requestReceived);
+
+    // первый запрос — обрабатываем, отвечаем
+    t->simulateReceive(SimpleFrameCodec::makeFrame(SimpleFrameCodec::Request, 1,
+                                                   QByteArray("A")));
+    QCOMPARE(spy.count(), 1);
+    QVERIFY(gw.reply(1, QByteArray("R1")));
+
+    // дубль — без кэша приложение должно обработать его повторно
+    t->simulateReceive(SimpleFrameCodec::makeFrame(SimpleFrameCodec::Request, 1,
+                                                   QByteArray("A")));
+    QCOMPARE(spy.count(), 2);
+    QCOMPARE(gw.stats().cachedRepliesResent, quint64(0));
+}
+
+void TestGateway::replyCache_enabled_resendsCachedReplyWithoutEmittingSignal()
+{
+    Gateway gw;
+    auto *t = wireUp(gw);
+
+    Gateway::ReplyCacheConfig cc;
+    cc.enabled    = true;
+    cc.maxEntries = 16;
+    gw.setReplyCacheConfig(cc);
+    QVERIFY(gw.isReplyCacheEnabled());
+
+    gw.enableChannel();
+    gw.startSession();
+    replyKeepAlive(t);
+
+    QSignalSpy spy(&gw, &Gateway::requestReceived);
+
+    // первый раз — приложение получает сигнал и отвечает
+    t->simulateReceive(SimpleFrameCodec::makeFrame(SimpleFrameCodec::Request, 99,
+                                                   QByteArray("X")));
+    QCOMPARE(spy.count(), 1);
+    QVERIFY(gw.reply(99, QByteArray("Y")));
+
+    t->clearSent();
+
+    // повтор — сигнал НЕ эмитится, в транспорт сразу уходит сохранённый ответ
+    t->simulateReceive(SimpleFrameCodec::makeFrame(SimpleFrameCodec::Request, 99,
+                                                   QByteArray("X")));
+    QCOMPARE(spy.count(), 1);                   // не вырос
+    QCOMPARE(t->sent().size(), 1);
+
+    QByteArray buf = t->sent().first();
+    auto frames = SimpleFrameCodec::parse(buf);
+    QCOMPARE(frames.size(), size_t(1));
+    QCOMPARE(frames[0].type,    quint8(SimpleFrameCodec::Reply));
+    QCOMPARE(frames[0].corrId,  quint32(99));
+    QCOMPARE(frames[0].payload, QByteArray("Y"));
+
+    QCOMPARE(gw.stats().cachedRepliesResent, quint64(1));
+    QCOMPARE(gw.stats().incomingRequests,    quint64(2));
+}
+
+void TestGateway::replyCache_disableClearsExistingEntries()
+{
+    Gateway gw;
+    auto *t = wireUp(gw);
+
+    Gateway::ReplyCacheConfig cc;
+    cc.enabled = true;
+    gw.setReplyCacheConfig(cc);
+
+    gw.enableChannel();
+    gw.startSession();
+    replyKeepAlive(t);
+
+    // положим запись в кэш
+    t->simulateReceive(SimpleFrameCodec::makeFrame(SimpleFrameCodec::Request, 5,
+                                                   QByteArray("CMD")));
+    QVERIFY(gw.reply(5, QByteArray("DONE")));
+
+    QSignalSpy chSpy(&gw, &Gateway::replyCacheEnabledChanged);
+    gw.setReplyCacheEnabled(false);
+    QCOMPARE(chSpy.count(), 1);
+    QCOMPARE(chSpy.first().at(0).toBool(), false);
+
+    // снова включим — кэш должен оказаться пустым (disable очистил)
+    gw.setReplyCacheEnabled(true);
+
+    QSignalSpy reqSpy(&gw, &Gateway::requestReceived);
+    t->simulateReceive(SimpleFrameCodec::makeFrame(SimpleFrameCodec::Request, 5,
+                                                   QByteArray("CMD")));
+    QCOMPARE(reqSpy.count(), 1);   // снова эмитим — записи в кэше нет
 }
 
 QTEST_MAIN(TestGateway)
