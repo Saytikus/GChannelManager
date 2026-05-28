@@ -11,6 +11,9 @@ private slots:
     void encodeReply_carriesCorrelation();
     void encodeData_carriesNoCorrelation();
     void encodeKeepAlive_classifiedAsKeepAliveReplyOnly();
+    void encodeSessionStart_classifiedAsType_SessionStart();
+    void encodeSessionStartAck_classifiedAsType_SessionStartAck();
+    void encodeSessionStop_classifiedAsType_SessionStop();
     void feed_splitAcrossCalls_buffered();
     void feed_garbagePrefix_resyncsByMagic();
     void feed_multipleFrames_inOneBuffer();
@@ -101,6 +104,36 @@ void TestSimpleFrameCodec::encodeKeepAlive_classifiedAsKeepAliveReplyOnly()
     msgs = codec.feed(rep);
     QCOMPARE(msgs.size(), size_t(1));
     QCOMPARE(msgs[0].type, DecodedMessage::Type::KeepAlive);
+}
+
+void TestSimpleFrameCodec::encodeSessionStart_classifiedAsType_SessionStart()
+{
+    SimpleFrameCodec codec;
+    const QByteArray frame = codec.encodeSessionStart();
+    QCOMPARE(quint8(frame[1]), quint8(SimpleFrameCodec::SessionStart));
+    const auto msgs = codec.feed(frame);
+    QCOMPARE(msgs.size(), size_t(1));
+    QCOMPARE(msgs[0].type, DecodedMessage::Type::SessionStart);
+}
+
+void TestSimpleFrameCodec::encodeSessionStartAck_classifiedAsType_SessionStartAck()
+{
+    SimpleFrameCodec codec;
+    const QByteArray frame = codec.encodeSessionStartAck();
+    QCOMPARE(quint8(frame[1]), quint8(SimpleFrameCodec::SessionStartAck));
+    const auto msgs = codec.feed(frame);
+    QCOMPARE(msgs.size(), size_t(1));
+    QCOMPARE(msgs[0].type, DecodedMessage::Type::SessionStartAck);
+}
+
+void TestSimpleFrameCodec::encodeSessionStop_classifiedAsType_SessionStop()
+{
+    SimpleFrameCodec codec;
+    const QByteArray frame = codec.encodeSessionStop();
+    QCOMPARE(quint8(frame[1]), quint8(SimpleFrameCodec::SessionStop));
+    const auto msgs = codec.feed(frame);
+    QCOMPARE(msgs.size(), size_t(1));
+    QCOMPARE(msgs[0].type, DecodedMessage::Type::SessionStop);
 }
 
 void TestSimpleFrameCodec::feed_splitAcrossCalls_buffered()

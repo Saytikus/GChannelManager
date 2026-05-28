@@ -45,6 +45,21 @@ QByteArray SimpleFrameCodec::encodeData(const QByteArray &payload)
     return makeFrame(Data, 0, payload);   // корреляция не нужна
 }
 
+QByteArray SimpleFrameCodec::encodeSessionStart()
+{
+    return makeFrame(SessionStart, 0, {});
+}
+
+QByteArray SimpleFrameCodec::encodeSessionStartAck()
+{
+    return makeFrame(SessionStartAck, 0, {});
+}
+
+QByteArray SimpleFrameCodec::encodeSessionStop()
+{
+    return makeFrame(SessionStop, 0, {});
+}
+
 QByteArray SimpleFrameCodec::encodeKeepAlive()
 {
     return makeFrame(KeepAliveReq, 0, {});
@@ -83,11 +98,14 @@ std::vector<DecodedMessage> SimpleFrameCodec::feed(const QByteArray &bytes)
         m.correlationId = f.corrId;
         m.payload       = f.payload;
         switch (f.type) {
-        case Request:        m.type = DecodedMessage::Type::Request;   break;
-        case Reply:          m.type = DecodedMessage::Type::Reply;     break;
-        case KeepAliveReply: m.type = DecodedMessage::Type::KeepAlive; break;
-        case Data:           m.type = DecodedMessage::Type::Data;      break;
-        default:             m.type = DecodedMessage::Type::Unknown;   break;   // KeepAliveReq и пр.
+        case Request:         m.type = DecodedMessage::Type::Request;         break;
+        case Reply:           m.type = DecodedMessage::Type::Reply;           break;
+        case KeepAliveReply:  m.type = DecodedMessage::Type::KeepAlive;       break;
+        case Data:            m.type = DecodedMessage::Type::Data;            break;
+        case SessionStart:    m.type = DecodedMessage::Type::SessionStart;    break;
+        case SessionStartAck: m.type = DecodedMessage::Type::SessionStartAck; break;
+        case SessionStop:     m.type = DecodedMessage::Type::SessionStop;     break;
+        default:              m.type = DecodedMessage::Type::Unknown;         break;   // KeepAliveReq и пр.
         }
         out.push_back(std::move(m));
     }

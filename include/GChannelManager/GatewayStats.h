@@ -22,6 +22,11 @@ struct GatewayStats {
     quint64 dataReceived       = 0;   // несвязанных Data-сообщений
     quint64 incomingRequests   = 0;   // Request-кадров от узла
     quint64 cachedRepliesResent = 0;  // ответов, повторно отправленных из кэша
+    quint64 sessionStartsSent       = 0;   // отправленных SessionStart
+    quint64 sessionStartsReceived   = 0;   // полученных SessionStart от узла
+    quint64 sessionStartTimeouts    = 0;   // не дождались SessionStartAck в срок
+    quint64 sessionStopsSent        = 0;
+    quint64 sessionStopsReceived    = 0;
 };
 
 Q_DECLARE_METATYPE(GatewayStats)

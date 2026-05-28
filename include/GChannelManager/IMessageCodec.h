@@ -34,6 +34,11 @@ public:
     // ответа не ожидается. Используется Gateway::send().
     [[nodiscard]] virtual QByteArray encodeData(const QByteArray &payload) = 0;
 
+    // Кадры жизненного цикла сессии — отдельный канал от keep-alive.
+    [[nodiscard]] virtual QByteArray encodeSessionStart()    = 0;
+    [[nodiscard]] virtual QByteArray encodeSessionStartAck() = 0;
+    [[nodiscard]] virtual QByteArray encodeSessionStop()     = 0;
+
     // Сформировать keep-alive кадр.
     [[nodiscard]] virtual QByteArray encodeKeepAlive() = 0;
 

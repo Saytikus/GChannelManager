@@ -1,14 +1,64 @@
 #include "GChannelManager/Gateway.h"
 
 #include <QTimer>
-#include <cmath>
 
+#include "internal/KeepAliveMonitor.h"
+#include "internal/PendingRequests.h"
+#include "internal/SessionHandshake.h"
+
+using gcm::internal::KeepAliveMonitor;
+using gcm::internal::PendingRequests;
+using gcm::internal::SessionHandshake;
+
+// ---------------------------------------------------------------------
+//  Конструктор: создаём коллабораторов и связываем их сигналы со
+//  счётчиками статистики Gateway. Все коллабораторы — QObject, владение
+//  через std::unique_ptr (без Qt parent — чтобы избежать двойного владения).
+// ---------------------------------------------------------------------
 Gateway::Gateway(QObject *parent)
     : QObject(parent)
+    , m_requests (std::make_unique<PendingRequests>())
+    , m_keepAlive(std::make_unique<KeepAliveMonitor>())
+    , m_handshake(std::make_unique<SessionHandshake>())
 {
-    m_keepAliveTimer = new QTimer(this);
-    m_keepAliveTimer->setSingleShot(false);
-    connect(m_keepAliveTimer, &QTimer::timeout, this, &Gateway::onKeepAliveTick);
+    // Статистика на основе сигналов коллабораторов.
+    connect(m_requests.get(), &PendingRequests::bytesPushed,
+            this, [this](qint64 b) { m_stats.sentBytes += quint64(b); });
+    connect(m_requests.get(), &PendingRequests::retryStarted,
+            this, [this] { m_stats.retries += 1; });
+    connect(m_requests.get(), &PendingRequests::requestSucceeded,
+            this, [this] { m_stats.requestsSucceeded += 1; });
+    connect(m_requests.get(), &PendingRequests::requestFailed,
+            this, [this] { m_stats.requestsFailed += 1; });
+
+    connect(m_keepAlive.get(), &KeepAliveMonitor::bytesPushed,
+            this, [this](qint64 b) {
+                m_stats.sentBytes      += quint64(b);
+                m_stats.keepAlivesSent += 1;
+            });
+    connect(m_keepAlive.get(), &KeepAliveMonitor::replyReceived,
+            this, [this] { m_stats.keepAlivesReceived += 1; });
+    connect(m_keepAlive.get(), &KeepAliveMonitor::missedExceeded,
+            this, [this] {
+                if (m_session == SessionState::Active) {
+                    m_stats.suspensions += 1;
+                    setSessionState(SessionState::Suspended);
+                }
+            });
+    connect(m_keepAlive.get(), &KeepAliveMonitor::recovered,
+            this, [this] {
+                if (m_session == SessionState::Suspended)
+                    setSessionState(SessionState::Active);
+            });
+
+    connect(m_handshake.get(), &SessionHandshake::timedOut,
+            this, [this] {
+                if (m_session != SessionState::Establishing)
+                    return;
+                m_stats.sessionStartTimeouts += 1;
+                emit errorOccurred(QStringLiteral("startSession: SessionStartAck не получен в срок"));
+                setSessionState(SessionState::Idle);
+            });
 
     m_statsTimer = new QTimer(this);
     m_statsTimer->setSingleShot(false);
@@ -29,6 +79,7 @@ void Gateway::setTransport(std::unique_ptr<ITransport> transport)
     }
 
     m_transport = std::move(transport);
+    propagateTransport();
     if (!m_transport)
         return;
 
@@ -41,28 +92,55 @@ void Gateway::setTransport(std::unique_ptr<ITransport> transport)
 void Gateway::setCodec(std::unique_ptr<IMessageCodec> codec)
 {
     m_codec = std::move(codec);
+    propagateCodec();
+}
+
+void Gateway::propagateTransport()
+{
+    ITransport *t = m_transport.get();
+    m_requests ->setTransport(t);
+    m_keepAlive->setTransport(t);
+    m_handshake->setTransport(t);
+}
+
+void Gateway::propagateCodec()
+{
+    IMessageCodec *c = m_codec.get();
+    m_requests ->setCodec(c);
+    m_keepAlive->setCodec(c);
+    m_handshake->setCodec(c);
 }
 
 // ---------------------------------------------------------------------
-//  Keep-alive: конфигурация с применением "на лету"
+//  Конфигурация — проксируется коллабораторам
 // ---------------------------------------------------------------------
+void Gateway::setDefaultRetryPolicy(const RetryPolicy &p) { m_requests->setDefaultPolicy(p); }
+Gateway::RetryPolicy Gateway::defaultRetryPolicy() const  { return m_requests->defaultPolicy(); }
+
+Gateway::KeepAliveConfig Gateway::keepAliveConfig() const { return m_keepAlive->config(); }
+bool Gateway::isKeepAliveEnabled() const                  { return m_keepAlive->isEnabled(); }
+
+void Gateway::setSessionStartTimeout(std::chrono::milliseconds timeout)
+{
+    m_handshake->setTimeout(timeout);
+}
+
+std::chrono::milliseconds Gateway::sessionStartTimeout() const
+{
+    return m_handshake->timeout();
+}
+
 void Gateway::setKeepAliveConfig(const KeepAliveConfig &k)
 {
-    const bool wasEnabled  = m_keepAlive.enabled;
-    const auto oldInterval = m_keepAlive.interval;
-    m_keepAlive = k;
+    const bool wasEnabled = m_keepAlive->isEnabled();
+    m_keepAlive->setConfig(k);
 
-    const bool sessionRunning = (m_session != SessionState::Idle &&
-                                 m_session != SessionState::Stopping);
-
-    if (sessionRunning) {
-        if (!wasEnabled && k.enabled) {
-            applyKeepAliveStart();
-        } else if (wasEnabled && !k.enabled) {
-            applyKeepAliveStop();
-        } else if (k.enabled && oldInterval != k.interval && m_keepAliveTimer->isActive()) {
-            m_keepAliveTimer->setInterval(qint32(k.interval.count()));
-        }
+    if (m_session == SessionState::Active && !wasEnabled && k.enabled) {
+        // включили heartbeat в работающей сессии
+        m_keepAlive->start();
+    } else if (wasEnabled && !k.enabled && m_session == SessionState::Suspended) {
+        // выключили heartbeat в Suspended — нечем выявить разрыв, считаем линк живым
+        setSessionState(SessionState::Active);
     }
 
     if (wasEnabled != k.enabled)
@@ -71,29 +149,11 @@ void Gateway::setKeepAliveConfig(const KeepAliveConfig &k)
 
 void Gateway::setKeepAliveEnabled(bool enabled)
 {
-    if (m_keepAlive.enabled == enabled)
+    if (m_keepAlive->isEnabled() == enabled)
         return;
-    KeepAliveConfig k = m_keepAlive;
-    k.enabled = enabled;
-    setKeepAliveConfig(k);
-}
-
-void Gateway::applyKeepAliveStart()
-{
-    if (!m_codec)
-        return;
-    m_missedKeepAlives = 0;
-    m_keepAliveTimer->start(qint32(m_keepAlive.interval.count()));
-    onKeepAliveTick();   // сразу шлём первый heartbeat
-}
-
-void Gateway::applyKeepAliveStop()
-{
-    m_keepAliveTimer->stop();
-    m_missedKeepAlives = 0;
-    // без heartbeat нечем выявить разрыв — считаем линк живым
-    if (m_session == SessionState::Establishing || m_session == SessionState::Suspended)
-        setSessionState(SessionState::Active);
+    KeepAliveConfig c = m_keepAlive->config();
+    c.enabled = enabled;
+    setKeepAliveConfig(c);
 }
 
 // ---------------------------------------------------------------------
@@ -107,7 +167,7 @@ void Gateway::enableChannel()
     }
     if (isChannelEnabled())
         return;
-    m_transport->open();   // подтверждение придёт в onTransportOpened()
+    m_transport->open();
 }
 
 void Gateway::disableChannel()
@@ -115,7 +175,7 @@ void Gateway::disableChannel()
     if (m_session != SessionState::Idle)
         stopSession();
     if (m_transport)
-        m_transport->close();   // подтверждение — в onTransportClosed()
+        m_transport->close();
     else
         setChannelState(ChannelState::Disabled);
 }
@@ -127,8 +187,9 @@ void Gateway::onTransportOpened()
 
 void Gateway::onTransportClosed()
 {
-    m_keepAliveTimer->stop();
-    failAllPending(GatewayRequest::Error::ChannelDisabled);
+    m_handshake->cancelTimeout();
+    m_keepAlive->stop();
+    m_requests->failAll(GatewayRequest::Error::ChannelDisabled);
     setSessionState(SessionState::Idle);
     setChannelState(ChannelState::Disabled);
 }
@@ -139,7 +200,7 @@ void Gateway::onTransportError(const QString &msg)
 }
 
 // ---------------------------------------------------------------------
-//  Сессия + keep-alive (RUDP-подобная устойчивость к разрывам)
+//  Сессия
 // ---------------------------------------------------------------------
 void Gateway::startSession()
 {
@@ -149,18 +210,18 @@ void Gateway::startSession()
     }
     if (m_session == SessionState::Active || m_session == SessionState::Establishing)
         return;
+    if (!m_codec) {
+        emit errorOccurred(QStringLiteral("startSession: кодек не установлен"));
+        return;
+    }
 
-    if (m_codec)
-        m_codec->reset();
-    m_missedKeepAlives = 0;
+    m_codec->reset();
 
-    if (m_keepAlive.enabled && m_codec) {
-        setSessionState(SessionState::Establishing);
-        m_keepAliveTimer->start(qint32(m_keepAlive.interval.count()));
-        onKeepAliveTick();             // сразу шлём первый keep-alive
-    } else {
-        // без keep-alive считаем сессию активной немедленно
-        setSessionState(SessionState::Active);
+    setSessionState(SessionState::Establishing);
+    const qint64 bytes = m_handshake->initiate();
+    if (bytes >= 0) {
+        m_stats.sentBytes         += quint64(bytes);
+        m_stats.sessionStartsSent += 1;
     }
 }
 
@@ -169,40 +230,24 @@ void Gateway::stopSession()
     if (m_session == SessionState::Idle)
         return;
     setSessionState(SessionState::Stopping);
-    m_keepAliveTimer->stop();
-    failAllPending(GatewayRequest::Error::SessionInactive);
+    m_handshake->cancelTimeout();
+    m_keepAlive->stop();
+
+    const qint64 bytes = m_handshake->terminate();
+    if (bytes >= 0) {
+        m_stats.sentBytes        += quint64(bytes);
+        m_stats.sessionStopsSent += 1;
+    }
+    m_requests->failAll(GatewayRequest::Error::SessionInactive);
     setSessionState(SessionState::Idle);
 }
 
-void Gateway::onKeepAliveTick()
+void Gateway::enterActiveState()
 {
-    if (m_session == SessionState::Idle || m_session == SessionState::Stopping)
-        return;
-    if (!m_keepAlive.enabled)
-        return;
-    if (!m_codec || !m_transport || !m_transport->isOpen())
-        return;
-
-    const QByteArray frame = m_codec->encodeKeepAlive();
-    m_transport->send(frame);
-    m_stats.sentBytes      += quint64(frame.size());
-    m_stats.keepAlivesSent += 1;
-    ++m_missedKeepAlives;
-
-    if (m_missedKeepAlives > m_keepAlive.maxMissed) {
-        if (m_session == SessionState::Active || m_session == SessionState::Establishing) {
-            m_stats.suspensions += 1;
-            setSessionState(SessionState::Suspended);  // линк пропал — ждём восстановления
-        }
-    }
-}
-
-void Gateway::onKeepAliveReply()
-{
-    m_stats.keepAlivesReceived += 1;
-    m_missedKeepAlives = 0;
-    if (m_session == SessionState::Establishing || m_session == SessionState::Suspended)
-        setSessionState(SessionState::Active);
+    m_handshake->cancelTimeout();
+    setSessionState(SessionState::Active);
+    if (m_keepAlive->isEnabled())
+        m_keepAlive->start();
 }
 
 // ---------------------------------------------------------------------
@@ -218,19 +263,15 @@ void Gateway::onTransportBytes(const QByteArray &bytes)
     for (const auto &msg : m_codec->feed(bytes)) {
         switch (msg.type) {
         case DecodedMessage::Type::Reply:
-            if (m_pending.contains(msg.correlationId)) {
-                completeSuccess(msg.correlationId, msg.payload);
-            } else {
+            if (!m_requests->tryCompleteSuccess(msg.correlationId, msg.payload)) {
                 m_stats.droppedReplies += 1;
-                emit dataReceived(msg.payload);   // ответ без ожидающего запроса
+                emit dataReceived(msg.payload);
             }
             break;
         case DecodedMessage::Type::Request:
             m_stats.incomingRequests += 1;
             if (m_replyCacheConfig.enabled && m_transport && m_transport->isOpen()) {
                 if (const QByteArray *cached = m_replyCache.object(msg.correlationId)) {
-                    // узел повторил уже отвеченный запрос — отправим сохранённый ответ,
-                    // requestReceived НЕ эмитим, чтобы команду не выполнили повторно.
                     m_transport->send(*cached);
                     m_stats.sentBytes          += quint64(cached->size());
                     m_stats.cachedRepliesResent += 1;
@@ -239,8 +280,35 @@ void Gateway::onTransportBytes(const QByteArray &bytes)
             }
             emit requestReceived(msg.correlationId, msg.payload);
             break;
+        case DecodedMessage::Type::SessionStart:
+            m_stats.sessionStartsReceived += 1;
+            {
+                const qint64 b = m_handshake->sendAck();
+                if (b >= 0)
+                    m_stats.sentBytes += quint64(b);
+            }
+            if (m_session == SessionState::Idle) {
+                m_codec->reset();
+                enterActiveState();
+            }
+            emit sessionStartReceived();
+            break;
+        case DecodedMessage::Type::SessionStartAck:
+            if (m_session == SessionState::Establishing)
+                enterActiveState();
+            break;
+        case DecodedMessage::Type::SessionStop:
+            m_stats.sessionStopsReceived += 1;
+            if (m_session != SessionState::Idle && m_session != SessionState::Stopping) {
+                m_handshake->cancelTimeout();
+                m_keepAlive->stop();
+                m_requests->failAll(GatewayRequest::Error::SessionInactive);
+                setSessionState(SessionState::Idle);
+            }
+            emit sessionStopReceived();
+            break;
         case DecodedMessage::Type::KeepAlive:
-            onKeepAliveReply();
+            m_keepAlive->noteReply();
             break;
         case DecodedMessage::Type::Data:
             m_stats.dataReceived += 1;
@@ -253,7 +321,7 @@ void Gateway::onTransportBytes(const QByteArray &bytes)
 }
 
 // ---------------------------------------------------------------------
-//  Ответ на входящий запрос + кэш ответов
+//  reply (+ idempotency-кэш)
 // ---------------------------------------------------------------------
 bool Gateway::reply(quint32 correlationId, const QByteArray &response)
 {
@@ -292,7 +360,7 @@ void Gateway::setReplyCacheConfig(const ReplyCacheConfig &c)
     if (oldMax != c.maxEntries)
         m_replyCache.setMaxCost(c.maxEntries);
     if (wasEnabled && !c.enabled)
-        m_replyCache.clear();   // disabled → освобождаем
+        m_replyCache.clear();
 
     if (wasEnabled != c.enabled)
         emit replyCacheEnabledChanged(c.enabled);
@@ -313,7 +381,7 @@ void Gateway::clearReplyCache()
 }
 
 // ---------------------------------------------------------------------
-//  Fire-and-forget отправка (без корреляции, без повторов)
+//  Fire-and-forget
 // ---------------------------------------------------------------------
 bool Gateway::send(const QByteArray &payload)
 {
@@ -342,161 +410,24 @@ bool Gateway::send(const QByteArray &payload)
 }
 
 // ---------------------------------------------------------------------
-//  Отправка с ожиданием ответа + повторы
+//  Запрос с ожиданием ответа — делегация PendingRequests
 // ---------------------------------------------------------------------
 GatewayRequest *Gateway::sendRequest(const QByteArray &payload)
 {
-    return sendRequest(payload, m_defaultRetry);
+    return sendRequest(payload, m_requests->defaultPolicy());
 }
 
 GatewayRequest *Gateway::sendRequest(const QByteArray &payload, const RetryPolicy &policy)
 {
-    auto *req = new GatewayRequest(this);
-    req->m_id          = nextId();
-    req->m_payload     = payload;
-    req->m_maxAttempts = 1 + policy.maxRetries;
-
-    // проверка предусловий
-    GatewayRequest::Error pre = GatewayRequest::Error::None;
     if (!m_codec)
-        pre = GatewayRequest::Error::TransportError;
-    else if (!isChannelEnabled())
-        pre = GatewayRequest::Error::ChannelDisabled;
-    else if (m_session == SessionState::Idle || m_session == SessionState::Stopping)
-        pre = GatewayRequest::Error::SessionInactive;
+        return m_requests->createPreflightFailed(GatewayRequest::Error::TransportError);
+    if (!isChannelEnabled())
+        return m_requests->createPreflightFailed(GatewayRequest::Error::ChannelDisabled);
+    if (m_session == SessionState::Idle || m_session == SessionState::Stopping)
+        return m_requests->createPreflightFailed(GatewayRequest::Error::SessionInactive);
 
-    if (pre != GatewayRequest::Error::None) {
-        failLater(req, pre);   // дать вызывающему подписаться на сигналы
-        return req;
-    }
-
-    Pending p;
-    p.policy = policy;
-    p.frame  = m_codec->encodeRequest(req->m_id, payload);
-    p.req    = req;
-    p.timer  = new QTimer(this);
-    p.timer->setSingleShot(true);
-
-    const quint32 id = req->m_id;
-    connect(p.timer, &QTimer::timeout, this, [this, id] { onAttemptTimeout(id); });
-    connect(req, &GatewayRequest::cancelRequested, this,
-            [this, id] { completeFailure(id, GatewayRequest::Error::Cancelled); });
-
-    m_pending.insert(id, p);
     m_stats.requestsSent += 1;
-
-    // первая отправка — в следующей итерации цикла событий,
-    // чтобы вызывающий успел подключить сигналы к req
-    QTimer::singleShot(0, this, [this, id] { startAttempt(id); });
-    return req;
-}
-
-quint32 Gateway::nextId()
-{
-    quint32 id = m_nextId++;
-    if (m_nextId == 0)
-        m_nextId = 1;          // 0 зарезервирован (keep-alive)
-    return id;
-}
-
-void Gateway::startAttempt(quint32 id)
-{
-    auto it = m_pending.find(id);
-    if (it == m_pending.end())
-        return;
-    Pending &p = it.value();
-
-    if (!m_transport || !m_transport->isOpen()) {
-        completeFailure(id, GatewayRequest::Error::TransportError);
-        return;
-    }
-
-    ++p.req->m_attempts;
-    m_transport->send(p.frame);
-    m_stats.sentBytes += quint64(p.frame.size());
-
-    const auto ms = attemptTimeout(p.policy, p.req->m_attempts - 1);
-    p.timer->start(qint32(ms.count()));
-}
-
-void Gateway::onAttemptTimeout(quint32 id)
-{
-    auto it = m_pending.find(id);
-    if (it == m_pending.end())
-        return;
-    Pending &p = it.value();
-
-    if (p.req->m_attempts >= 1 + p.policy.maxRetries) {
-        completeFailure(id, GatewayRequest::Error::Timeout);
-    } else {
-        m_stats.retries += 1;
-        emit p.req->retrying(p.req->m_attempts);
-        startAttempt(id);      // повтор
-    }
-}
-
-void Gateway::completeSuccess(quint32 id, const QByteArray &response)
-{
-    auto it = m_pending.find(id);
-    if (it == m_pending.end())
-        return;
-    Pending p = it.value();
-    m_pending.erase(it);
-
-    if (p.timer) { p.timer->stop(); p.timer->deleteLater(); }
-
-    p.req->m_response = response;
-    p.req->m_status   = GatewayRequest::Status::Succeeded;
-    m_stats.requestsSucceeded += 1;
-    emit p.req->succeeded(response);
-    emit p.req->finished();
-    p.req->deleteLater();
-}
-
-void Gateway::completeFailure(quint32 id, GatewayRequest::Error err)
-{
-    auto it = m_pending.find(id);
-    if (it == m_pending.end())
-        return;
-    Pending p = it.value();
-    m_pending.erase(it);
-
-    if (p.timer) { p.timer->stop(); p.timer->deleteLater(); }
-
-    p.req->m_status = GatewayRequest::Status::Failed;
-    p.req->m_error  = err;
-    m_stats.requestsFailed += 1;
-    emit p.req->failed(err);
-    emit p.req->finished();
-    p.req->deleteLater();
-}
-
-void Gateway::failLater(GatewayRequest *req, GatewayRequest::Error err)
-{
-    QTimer::singleShot(0, this, [this, req, err] {
-        req->m_status = GatewayRequest::Status::Failed;
-        req->m_error  = err;
-        m_stats.requestsFailed += 1;
-        emit req->failed(err);
-        emit req->finished();
-        req->deleteLater();
-    });
-}
-
-void Gateway::failAllPending(GatewayRequest::Error err)
-{
-    const auto ids = m_pending.keys();
-    for (quint32 id : ids)
-        completeFailure(id, err);
-}
-
-std::chrono::milliseconds Gateway::attemptTimeout(const RetryPolicy &p, qint32 attempt) const
-{
-    double t = double(p.timeout.count()) * std::pow(p.backoffFactor, attempt);
-    const double cap = double(p.maxTimeout.count());
-    if (t > cap)
-        t = cap;
-    return std::chrono::milliseconds(static_cast<qint64>(std::llround(t)));
+    return m_requests->enqueue(payload, policy);
 }
 
 // ---------------------------------------------------------------------
@@ -505,11 +436,10 @@ std::chrono::milliseconds Gateway::attemptTimeout(const RetryPolicy &p, qint32 a
 void Gateway::setStatsInterval(std::chrono::milliseconds interval)
 {
     m_statsInterval = interval;
-    if (interval.count() > 0) {
+    if (interval.count() > 0)
         m_statsTimer->start(qint32(interval.count()));
-    } else {
+    else
         m_statsTimer->stop();
-    }
 }
 
 void Gateway::resetStats()

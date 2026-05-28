@@ -43,6 +43,10 @@ public slots:
         for (const auto &f : SimpleFrameCodec::parse(m_buf)) {
             if (f.type == SimpleFrameCodec::KeepAliveReq) {
                 respond(SimpleFrameCodec::makeFrame(SimpleFrameCodec::KeepAliveReply, 0, {}), 15);
+            } else if (f.type == SimpleFrameCodec::SessionStart) {
+                respond(SimpleFrameCodec::makeFrame(SimpleFrameCodec::SessionStartAck, 0, {}), 10);
+            } else if (f.type == SimpleFrameCodec::SessionStop) {
+                // ничего — мы peer, узел сообщил что завершает сессию
             } else if (f.type == SimpleFrameCodec::Request) {
                 if (QRandomGenerator::global()->bounded(100) < 40) {
                     qInfo() << "[peer] drop request" << f.corrId;

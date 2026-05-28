@@ -32,6 +32,11 @@ void replyKeepAlive(FakeTransport *t) {
     t->simulateReceive(SimpleFrameCodec::makeFrame(SimpleFrameCodec::KeepAliveReply, 0, {}));
 }
 
+// Доставляет SessionStartAck — Gateway переводит сессию из Establishing в Active.
+void ackSessionStart(FakeTransport *t) {
+    t->simulateReceive(SimpleFrameCodec::makeFrame(SimpleFrameCodec::SessionStartAck, 0, {}));
+}
+
 // Из самой свежей записи в transport->sent() вытащить corrId последнего Request-кадра.
 // Возвращает 0, если такого нет.
 quint32 lastRequestCorrId(const FakeTransport *t)
@@ -72,6 +77,11 @@ private slots:
     void replyCache_disabled_emitsSignalOnEveryRequest();
     void replyCache_enabled_resendsCachedReplyWithoutEmittingSignal();
     void replyCache_disableClearsExistingEntries();
+    void startSession_sendsSessionStartFrame();
+    void stopSession_sendsSessionStopFrame();
+    void incomingSessionStart_acksAndEntersActive();
+    void incomingSessionStop_failsPendingAndGoesIdle();
+    void startSession_timeoutFiresWhenAckMissing();
 };
 
 void TestGateway::channelEnable_emitsStateAndOpensTransport()
@@ -89,26 +99,42 @@ void TestGateway::channelEnable_emitsStateAndOpensTransport()
 
 void TestGateway::session_reachesActive_afterKeepAliveReply()
 {
+    // Имя историческое — теперь сессия выходит в Active по SessionStartAck.
     Gateway gw;
     auto *t = wireUp(gw);
     gw.enableChannel();
     gw.startSession();
 
     QCOMPARE(gw.sessionState(), Gateway::SessionState::Establishing);
-    QVERIFY(!t->sent().isEmpty());   // первый keep-alive отправлен сразу
 
-    replyKeepAlive(t);
+    // первый отправленный кадр — SessionStart
+    QVERIFY(!t->sent().isEmpty());
+    QByteArray first = t->sent().first();
+    auto frames = SimpleFrameCodec::parse(first);
+    QVERIFY(!frames.empty());
+    QCOMPARE(frames[0].type, quint8(SimpleFrameCodec::SessionStart));
+
+    ackSessionStart(t);
     QCOMPARE(gw.sessionState(), Gateway::SessionState::Active);
 }
 
 void TestGateway::session_keepAliveDisabled_becomesActiveImmediately()
 {
+    // Имя историческое — handshake обязателен независимо от keep-alive.
+    // Тест проверяет: после ack heartbeat НЕ запускается, если keep-alive выключен.
     Gateway gw;
-    wireUp(gw, std::chrono::milliseconds(40), /*keepAliveEnabled=*/false);
+    auto *t = wireUp(gw, std::chrono::milliseconds(40), /*keepAliveEnabled=*/false);
     gw.enableChannel();
     gw.startSession();
+    QCOMPARE(gw.sessionState(), Gateway::SessionState::Establishing);
 
+    ackSessionStart(t);
     QCOMPARE(gw.sessionState(), Gateway::SessionState::Active);
+
+    t->clearSent();
+    QTest::qWait(120);   // дольше нескольких потенциальных тиков keep-alive
+    // ничего не должно уйти в транспорт — heartbeat выключен
+    QCOMPARE(t->sent().size(), 0);
 }
 
 void TestGateway::setKeepAliveEnabled_runtimeOff_clearsSuspendedToActive()
@@ -117,18 +143,20 @@ void TestGateway::setKeepAliveEnabled_runtimeOff_clearsSuspendedToActive()
     auto *t = wireUp(gw);
     gw.enableChannel();
     gw.startSession();
-    // в Establishing — линк ещё не подтверждён
-    QCOMPARE(gw.sessionState(), Gateway::SessionState::Establishing);
+    ackSessionStart(t);
+    QCOMPARE(gw.sessionState(), Gateway::SessionState::Active);
+
+    // не отвечаем на keep-alive — должны попасть в Suspended (maxMissed=3, interval=40мс)
+    QTRY_COMPARE_WITH_TIMEOUT(gw.sessionState(),
+                              Gateway::SessionState::Suspended, 1500);
 
     QSignalSpy kaSpy(&gw, &Gateway::keepAliveEnabledChanged);
     gw.setKeepAliveEnabled(false);
-
     QCOMPARE(kaSpy.count(), 1);
     QCOMPARE(kaSpy.first().at(0).toBool(), false);
-    // без heartbeat нечем подтверждать линк — Gateway считает сессию Active
+    // без heartbeat не выявить разрыв — Gateway считает сессию Active
     QCOMPARE(gw.sessionState(), Gateway::SessionState::Active);
     QVERIFY(!gw.isKeepAliveEnabled());
-    Q_UNUSED(t);
 }
 
 void TestGateway::setKeepAliveEnabled_runtimeOn_startsHeartbeat()
@@ -137,6 +165,7 @@ void TestGateway::setKeepAliveEnabled_runtimeOn_startsHeartbeat()
     auto *t = wireUp(gw, std::chrono::milliseconds(40), /*keepAliveEnabled=*/false);
     gw.enableChannel();
     gw.startSession();
+    ackSessionStart(t);
     QCOMPARE(gw.sessionState(), Gateway::SessionState::Active);
     t->clearSent();
 
@@ -156,7 +185,7 @@ void TestGateway::sendRequest_succeedsOnPeerReply()
     auto *t = wireUp(gw);
     gw.enableChannel();
     gw.startSession();
-    replyKeepAlive(t);
+    ackSessionStart(t);
     QCOMPARE(gw.sessionState(), Gateway::SessionState::Active);
     t->clearSent();
 
@@ -186,7 +215,7 @@ void TestGateway::sendRequest_retriesOnTimeout_thenSucceeds()
     auto *t = wireUp(gw);
     gw.enableChannel();
     gw.startSession();
-    replyKeepAlive(t);
+    ackSessionStart(t);
     t->clearSent();
 
     Gateway::RetryPolicy policy;
@@ -232,7 +261,7 @@ void TestGateway::send_fireAndForget_emitsDataFrame()
     auto *t = wireUp(gw);
     gw.enableChannel();
     gw.startSession();
-    replyKeepAlive(t);
+    ackSessionStart(t);
     QCOMPARE(gw.sessionState(), Gateway::SessionState::Active);
     t->clearSent();
 
@@ -267,7 +296,7 @@ void TestGateway::cancel_failsPendingRequest()
     auto *t = wireUp(gw);
     gw.enableChannel();
     gw.startSession();
-    replyKeepAlive(t);
+    ackSessionStart(t);
 
     Gateway::RetryPolicy slow;
     slow.maxRetries = 5;
@@ -288,8 +317,9 @@ void TestGateway::stats_countersTrackKeepAliveAndRequest()
     auto *t = wireUp(gw);
     gw.enableChannel();
     gw.startSession();
+    ackSessionStart(t);
 
-    // первый keep-alive ушёл сразу же в onKeepAliveTick()
+    // первый keep-alive ушёл сразу же в enterActiveState()
     QVERIFY(gw.stats().keepAlivesSent >= 1);
     QCOMPARE(gw.stats().keepAlivesReceived, quint64(0));
 
@@ -320,7 +350,7 @@ void TestGateway::stats_droppedReplyCounted()
     auto *t = wireUp(gw);
     gw.enableChannel();
     gw.startSession();
-    replyKeepAlive(t);
+    ackSessionStart(t);
     QCOMPARE(gw.sessionState(), Gateway::SessionState::Active);
 
     // приходит Reply на несуществующий corrId — должен учесться как droppedReplies
@@ -335,7 +365,7 @@ void TestGateway::stats_periodicSignalFires_andStopsOnZeroInterval()
     auto *t = wireUp(gw);
     gw.enableChannel();
     gw.startSession();
-    replyKeepAlive(t);
+    ackSessionStart(t);
 
     QSignalSpy spy(&gw, &Gateway::statsUpdated);
     gw.setStatsInterval(std::chrono::milliseconds(30));
@@ -360,7 +390,7 @@ void TestGateway::stats_resetClearsCounters()
     auto *t = wireUp(gw);
     gw.enableChannel();
     gw.startSession();
-    replyKeepAlive(t);
+    ackSessionStart(t);
     QVERIFY(gw.stats().keepAlivesSent >= 1);
 
     gw.resetStats();
@@ -381,7 +411,7 @@ void TestGateway::incomingRequest_emitsRequestReceived()
     auto *t = wireUp(gw);
     gw.enableChannel();
     gw.startSession();
-    replyKeepAlive(t);
+    ackSessionStart(t);
 
     QSignalSpy spy(&gw, &Gateway::requestReceived);
     t->simulateReceive(SimpleFrameCodec::makeFrame(SimpleFrameCodec::Request, 42,
@@ -399,7 +429,7 @@ void TestGateway::reply_sendsReplyFrameViaTransport()
     auto *t = wireUp(gw);
     gw.enableChannel();
     gw.startSession();
-    replyKeepAlive(t);
+    ackSessionStart(t);
     t->clearSent();
 
     QVERIFY(gw.reply(7, QByteArray("DONE")));
@@ -422,7 +452,7 @@ void TestGateway::replyCache_disabled_emitsSignalOnEveryRequest()
 
     gw.enableChannel();
     gw.startSession();
-    replyKeepAlive(t);
+    ackSessionStart(t);
 
     QSignalSpy spy(&gw, &Gateway::requestReceived);
 
@@ -452,7 +482,7 @@ void TestGateway::replyCache_enabled_resendsCachedReplyWithoutEmittingSignal()
 
     gw.enableChannel();
     gw.startSession();
-    replyKeepAlive(t);
+    ackSessionStart(t);
 
     QSignalSpy spy(&gw, &Gateway::requestReceived);
 
@@ -492,7 +522,7 @@ void TestGateway::replyCache_disableClearsExistingEntries()
 
     gw.enableChannel();
     gw.startSession();
-    replyKeepAlive(t);
+    ackSessionStart(t);
 
     // положим запись в кэш
     t->simulateReceive(SimpleFrameCodec::makeFrame(SimpleFrameCodec::Request, 5,
@@ -511,6 +541,140 @@ void TestGateway::replyCache_disableClearsExistingEntries()
     t->simulateReceive(SimpleFrameCodec::makeFrame(SimpleFrameCodec::Request, 5,
                                                    QByteArray("CMD")));
     QCOMPARE(reqSpy.count(), 1);   // снова эмитим — записи в кэше нет
+}
+
+// ---------------------------------------------------------------------
+//  Жизненный цикл сессии: отдельные кадры SessionStart/Stop
+// ---------------------------------------------------------------------
+void TestGateway::startSession_sendsSessionStartFrame()
+{
+    Gateway gw;
+    auto *t = wireUp(gw);
+    gw.enableChannel();
+    t->clearSent();
+
+    gw.startSession();
+
+    QCOMPARE(gw.sessionState(), Gateway::SessionState::Establishing);
+    QCOMPARE(gw.stats().sessionStartsSent, quint64(1));
+
+    // первый кадр в транспорте — SessionStart
+    QVERIFY(!t->sent().isEmpty());
+    QByteArray buf = t->sent().first();
+    auto frames = SimpleFrameCodec::parse(buf);
+    QVERIFY(!frames.empty());
+    QCOMPARE(frames[0].type, quint8(SimpleFrameCodec::SessionStart));
+}
+
+void TestGateway::stopSession_sendsSessionStopFrame()
+{
+    Gateway gw;
+    auto *t = wireUp(gw);
+    gw.enableChannel();
+    gw.startSession();
+    ackSessionStart(t);
+    QCOMPARE(gw.sessionState(), Gateway::SessionState::Active);
+    t->clearSent();
+
+    gw.stopSession();
+
+    QCOMPARE(gw.sessionState(), Gateway::SessionState::Idle);
+    QCOMPARE(gw.stats().sessionStopsSent, quint64(1));
+
+    // в транспорте должен быть SessionStop кадр
+    bool foundStop = false;
+    for (const auto &raw : t->sent()) {
+        QByteArray b = raw;
+        for (const auto &f : SimpleFrameCodec::parse(b)) {
+            if (f.type == SimpleFrameCodec::SessionStop) {
+                foundStop = true;
+                break;
+            }
+        }
+    }
+    QVERIFY(foundStop);
+}
+
+void TestGateway::incomingSessionStart_acksAndEntersActive()
+{
+    Gateway gw;
+    auto *t = wireUp(gw);
+    gw.enableChannel();
+    QCOMPARE(gw.sessionState(), Gateway::SessionState::Idle);
+
+    QSignalSpy startSpy(&gw, &Gateway::sessionStartReceived);
+    t->clearSent();
+
+    // узел инициирует сессию с нами
+    t->simulateReceive(SimpleFrameCodec::makeFrame(SimpleFrameCodec::SessionStart, 0, {}));
+
+    QCOMPARE(gw.sessionState(), Gateway::SessionState::Active);
+    QCOMPARE(startSpy.count(), 1);
+    QCOMPARE(gw.stats().sessionStartsReceived, quint64(1));
+
+    // мы должны отправить SessionStartAck в ответ
+    bool foundAck = false;
+    for (const auto &raw : t->sent()) {
+        QByteArray b = raw;
+        for (const auto &f : SimpleFrameCodec::parse(b)) {
+            if (f.type == SimpleFrameCodec::SessionStartAck) {
+                foundAck = true;
+                break;
+            }
+        }
+    }
+    QVERIFY(foundAck);
+}
+
+void TestGateway::incomingSessionStop_failsPendingAndGoesIdle()
+{
+    Gateway gw;
+    auto *t = wireUp(gw);
+    gw.enableChannel();
+    gw.startSession();
+    ackSessionStart(t);
+    QCOMPARE(gw.sessionState(), Gateway::SessionState::Active);
+
+    // запускаем долгоиграющий запрос
+    Gateway::RetryPolicy slow;
+    slow.maxRetries = 10;
+    slow.timeout    = std::chrono::seconds(10);
+    auto *req = gw.sendRequest(QByteArray("ping"), slow);
+    QSignalSpy failSpy(req, &GatewayRequest::failed);
+    QSignalSpy stopSpy(&gw, &Gateway::sessionStopReceived);
+
+    // узел шлёт SessionStop
+    t->simulateReceive(SimpleFrameCodec::makeFrame(SimpleFrameCodec::SessionStop, 0, {}));
+
+    QCOMPARE(gw.sessionState(), Gateway::SessionState::Idle);
+    QCOMPARE(stopSpy.count(), 1);
+    QCOMPARE(gw.stats().sessionStopsReceived, quint64(1));
+
+    // pending должен быть провален с SessionInactive
+    QTRY_COMPARE(failSpy.count(), 1);
+    QCOMPARE(failSpy.first().at(0).value<GatewayRequest::Error>(),
+             GatewayRequest::Error::SessionInactive);
+}
+
+void TestGateway::startSession_timeoutFiresWhenAckMissing()
+{
+    Gateway gw;
+    auto *t = wireUp(gw);
+    gw.setSessionStartTimeout(std::chrono::milliseconds(80));   // быстрый таймаут
+    gw.enableChannel();
+
+    QSignalSpy stateSpy(&gw, &Gateway::sessionStateChanged);
+    QSignalSpy errSpy(&gw,  &Gateway::errorOccurred);
+
+    gw.startSession();
+    QCOMPARE(gw.sessionState(), Gateway::SessionState::Establishing);
+
+    // не отвечаем — ждём таймаут
+    QTRY_COMPARE_WITH_TIMEOUT(gw.sessionState(),
+                              Gateway::SessionState::Idle, 1000);
+    QCOMPARE(gw.stats().sessionStartTimeouts, quint64(1));
+    QVERIFY(errSpy.count() >= 1);
+    Q_UNUSED(t);
 }
 
 QTEST_MAIN(TestGateway)

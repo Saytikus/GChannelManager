@@ -10,11 +10,14 @@
 // =====================================================================
 struct DecodedMessage {
     enum class Type {
-        Reply,      // ответ на наш запрос -> смотрим correlationId
-        Request,    // запрос от узла к нам -> приложение отвечает Gateway::reply()
-        KeepAlive,  // keep-alive (подтверждение живости линка)
-        Data,       // данные без корреляции (push от узла)
-        Unknown     // не распознано / служебное
+        Reply,            // ответ на наш запрос -> смотрим correlationId
+        Request,          // запрос от узла к нам -> приложение отвечает Gateway::reply()
+        SessionStart,     // узел инициирует сессию (мы должны отвечать SessionStartAck)
+        SessionStartAck,  // узел подтвердил наш SessionStart (мы переходим в Active)
+        SessionStop,      // узел завершает сессию
+        KeepAlive,        // keep-alive (подтверждение живости линка)
+        Data,             // данные без корреляции (push от узла)
+        Unknown           // не распознано / служебное
     };
 
     Type       type          = Type::Unknown;

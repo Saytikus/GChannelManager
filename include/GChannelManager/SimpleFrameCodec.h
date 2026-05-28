@@ -16,11 +16,14 @@ class GCHANNELMANAGER_EXPORT SimpleFrameCodec final : public IMessageCodec
 {
 public:
     enum Type : quint8 {
-        Request        = 1,
-        Reply          = 2,
-        KeepAliveReq   = 3,
-        KeepAliveReply = 4,
-        Data           = 5
+        Request         = 1,
+        Reply           = 2,
+        KeepAliveReq    = 3,
+        KeepAliveReply  = 4,
+        Data            = 5,
+        SessionStart    = 6,
+        SessionStartAck = 7,
+        SessionStop     = 8
     };
 
     [[nodiscard]] QByteArray encodeRequest(quint32 correlationId,
@@ -28,6 +31,9 @@ public:
     [[nodiscard]] QByteArray encodeReply(quint32 correlationId,
                                          const QByteArray &payload) override;
     [[nodiscard]] QByteArray encodeData(const QByteArray &payload) override;
+    [[nodiscard]] QByteArray encodeSessionStart() override;
+    [[nodiscard]] QByteArray encodeSessionStartAck() override;
+    [[nodiscard]] QByteArray encodeSessionStop() override;
     [[nodiscard]] QByteArray encodeKeepAlive() override;
     [[nodiscard]] std::vector<DecodedMessage> feed(const QByteArray &bytes) override;
     void reset() override { m_buf.clear(); }

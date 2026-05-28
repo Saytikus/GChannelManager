@@ -2,7 +2,6 @@
 
 #include <QByteArray>
 #include <QCache>
-#include <QHash>
 #include <QObject>
 #include <chrono>
 #include <memory>
@@ -18,19 +17,23 @@
 
 class QTimer;
 
+namespace gcm::internal {
+class PendingRequests;
+class KeepAliveMonitor;
+class SessionHandshake;
+}
+
 // =====================================================================
-//  Гейтвей протокольного уровня.
+//  Gateway — координатор протокольного слоя.
 //
-//  Возможности:
-//    * установка транспорта (сериал/UDP/...) и кодека;
-//    * включение/выключение канала (open/close транспорта);
-//    * старт/стоп сессии с keep-alive; устойчивость к разрывам линка
-//      по типу RUDP: при пропаже keep-alive сессия уходит в Suspended,
-//      при восстановлении — обратно в Active, канал при этом не рвётся;
-//    * на лету включать/выключать keep-alive в работающей сессии
-//      (setKeepAliveEnabled / setKeepAliveConfig);
-//    * отправка с ожиданием ответа (sendRequest -> GatewayRequest);
-//    * настраиваемые повторы (RetryPolicy: число, таймаут, backoff).
+//  Сам по себе не содержит логики корреляции / heartbeat / handshake —
+//  делегирует это трём коллабораторам (PendingRequests, KeepAliveMonitor,
+//  SessionHandshake). Gateway отвечает только за:
+//    * установку транспорта/кодека и проксирование их сигналов,
+//    * машины состояний (ChannelState и SessionState),
+//    * координацию обработки входящего DecodedMessage::Type,
+//    * fire-and-forget send и reply на входящие запросы (+ idempotency-кэш),
+//    * сбор и публикацию статистики (GatewayStats).
 // =====================================================================
 class GCHANNELMANAGER_EXPORT Gateway : public QObject
 {
@@ -41,8 +44,8 @@ public:
 
     enum class SessionState {
         Idle,          // сессии нет
-        Establishing,  // устанавливается (ждём первый keep-alive)
-        Active,        // активна
+        Establishing,  // отправлен SessionStart, ждём SessionStartAck
+        Active,        // сессия установлена
         Suspended,     // линк временно пропал (RUDP-режим), запросы ждут
         Stopping       // останавливается
     };
@@ -64,19 +67,18 @@ public:
     [[nodiscard]] IMessageCodec *codec() const { return m_codec.get(); }
 
     // ---- конфигурация ----
-    void setDefaultRetryPolicy(const RetryPolicy &p) { m_defaultRetry = p; }
-    [[nodiscard]] RetryPolicy defaultRetryPolicy() const { return m_defaultRetry; }
+    void setDefaultRetryPolicy(const RetryPolicy &p);
+    [[nodiscard]] RetryPolicy defaultRetryPolicy() const;
 
-    // Применяется на лету: если сессия запущена, изменения enabled/interval
-    // подхватываются немедленно (heartbeat запускается/останавливается, сессия
-    // переходит в Active/Establishing/Suspended при необходимости).
     void setKeepAliveConfig(const KeepAliveConfig &k);
-    [[nodiscard]] KeepAliveConfig keepAliveConfig() const { return m_keepAlive; }
-    [[nodiscard]] bool isKeepAliveEnabled() const { return m_keepAlive.enabled; }
+    [[nodiscard]] KeepAliveConfig keepAliveConfig() const;
+    [[nodiscard]] bool isKeepAliveEnabled() const;
+
+    // Таймаут ожидания SessionStartAck (0 — без таймаута, ждём бесконечно).
+    void setSessionStartTimeout(std::chrono::milliseconds timeout);
+    [[nodiscard]] std::chrono::milliseconds sessionStartTimeout() const;
 
     // Кэш ответов на входящие запросы — для повторов от узла.
-    // Изменения применяются немедленно: выключение очищает кэш,
-    // изменение maxEntries делает ресайз с LRU-эвикцией.
     void setReplyCacheConfig(const ReplyCacheConfig &c);
     [[nodiscard]] ReplyCacheConfig replyCacheConfig() const { return m_replyCacheConfig; }
     [[nodiscard]] bool isReplyCacheEnabled() const { return m_replyCacheConfig.enabled; }
@@ -89,9 +91,7 @@ public:
     [[nodiscard]] bool isSessionActive()       const { return m_session == SessionState::Active; }
 
     // ---- статистика ----
-    // Снимок счётчиков "по требованию".
     [[nodiscard]] GatewayStats stats() const { return m_stats; }
-    // Период автоэмита statsUpdated(). 0 — отключено (по умолчанию).
     void setStatsInterval(std::chrono::milliseconds interval);
     [[nodiscard]] std::chrono::milliseconds statsInterval() const { return m_statsInterval; }
 
@@ -104,24 +104,22 @@ public slots:
     void startSession();
     void stopSession();
 
-    // keep-alive on/off в работающей сессии (как кнопка)
+    // keep-alive on/off в работающей сессии
     void setKeepAliveEnabled(bool enabled);
 
     // кэш ответов on/off в работающей сессии
     void setReplyCacheEnabled(bool enabled);
 
-    // ответ на входящий запрос (см. requestReceived). Возвращает true,
-    // если кадр поставлен в очередь транспорта.
+    // ответ на входящий запрос (см. requestReceived)
     bool reply(quint32 correlationId, const QByteArray &response);
 
     // сбросить все счётчики статистики в 0
     void resetStats();
 
-    // отправка БЕЗ ожидания ответа (fire-and-forget); корреляция не используется,
-    // повторов нет. Возвращает true, если кадр поставлен в очередь транспорта.
+    // отправка БЕЗ ожидания ответа (fire-and-forget)
     bool send(const QByteArray &payload);
 
-    // отправка с ожиданием ответа; подпишитесь на сигналы результата
+    // отправка с ожиданием ответа
     GatewayRequest *sendRequest(const QByteArray &payload);
     GatewayRequest *sendRequest(const QByteArray &payload, const RetryPolicy &policy);
 
@@ -131,22 +129,17 @@ signals:
     void keepAliveEnabledChanged(bool enabled);
     void replyCacheEnabledChanged(bool enabled);
     void errorOccurred(const QString &message);
-    void dataReceived(const QByteArray &payload);   // некоррелированные данные (push)
-    void requestReceived(quint32 correlationId,
-                         const QByteArray &payload); // входящий запрос от узла
-    void statsUpdated(GatewayStats stats);           // периодический снимок счётчиков
+    void dataReceived(const QByteArray &payload);
+    void requestReceived(quint32 correlationId, const QByteArray &payload);
+    void sessionStartReceived();
+    void sessionStopReceived();
+    void statsUpdated(GatewayStats stats);
 
 private:
-    struct Pending {
-        GatewayRequest *req   = nullptr;
-        RetryPolicy     policy;
-        QByteArray      frame;            // готовый кадр (пере-отправляется при повторе)
-        QTimer         *timer = nullptr;  // таймер ожидания ответа на попытку
-    };
-
     // переходы состояний
     void setChannelState(ChannelState s);
     void setSessionState(SessionState s);
+    void enterActiveState();   // общий путь "ack получен" / "peer открыл сессию"
 
     // обработчики транспорта
     void onTransportOpened();
@@ -154,37 +147,19 @@ private:
     void onTransportBytes(const QByteArray &bytes);
     void onTransportError(const QString &msg);
 
-    // keep-alive
-    void onKeepAliveTick();
-    void onKeepAliveReply();
-    void applyKeepAliveStart();   // включить heartbeat в работающей сессии
-    void applyKeepAliveStop();    // выключить heartbeat в работающей сессии
-
-    // запросы / повторы
-    quint32 nextId();
-    void startAttempt(quint32 id);
-    void onAttemptTimeout(quint32 id);
-    void completeSuccess(quint32 id, const QByteArray &response);
-    void completeFailure(quint32 id, GatewayRequest::Error err);
-    void failLater(GatewayRequest *req, GatewayRequest::Error err);
-    void failAllPending(GatewayRequest::Error err);
-
-    [[nodiscard]] std::chrono::milliseconds attemptTimeout(const RetryPolicy &p, qint32 attempt) const;
+    // распределение прав на коллабораторов
+    void propagateCodec();
+    void propagateTransport();
 
     std::unique_ptr<ITransport>    m_transport;
     std::unique_ptr<IMessageCodec> m_codec;
 
+    std::unique_ptr<gcm::internal::PendingRequests>  m_requests;
+    std::unique_ptr<gcm::internal::KeepAliveMonitor> m_keepAlive;
+    std::unique_ptr<gcm::internal::SessionHandshake> m_handshake;
+
     ChannelState m_channel = ChannelState::Disabled;
     SessionState m_session = SessionState::Idle;
-
-    RetryPolicy     m_defaultRetry{};
-    KeepAliveConfig m_keepAlive{};
-
-    QTimer *m_keepAliveTimer = nullptr;
-    qint32  m_missedKeepAlives = 0;
-
-    quint32 m_nextId = 1;
-    QHash<quint32, Pending> m_pending;
 
     GatewayStats              m_stats{};
     QTimer                   *m_statsTimer = nullptr;

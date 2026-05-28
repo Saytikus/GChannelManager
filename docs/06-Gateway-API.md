@@ -43,18 +43,32 @@ signals:
 
 ```cpp
 public slots:
-    void startSession();
-    void stopSession();
+    void startSession();   // отправляет SessionStart, ждёт SessionStartAck
+    void stopSession();    // отправляет SessionStop, переводит сессию в Idle
 
 public:
     [[nodiscard]] SessionState sessionState() const;
     [[nodiscard]] bool isSessionActive() const;
 
+    // таймаут ожидания SessionStartAck (0 — без таймаута)
+    void setSessionStartTimeout(std::chrono::milliseconds timeout);
+    [[nodiscard]] std::chrono::milliseconds sessionStartTimeout() const;
+
 signals:
     void sessionStateChanged(Gateway::SessionState state);
+    void sessionStartReceived();   // peer инициировал сессию с нами
+    void sessionStopReceived();    // peer завершил сессию
 ```
 
-Машина состояний — [Сессия](03-Состояния-и-переходы.md#сессия).
+Lifecycle сессии управляется тремя отдельными кадрами — `SessionStart`, `SessionStartAck`, `SessionStop` — и **не зависит** от keep-alive. Keep-alive используется только для проверки живости линии после `Active` (см. [Состояния и переходы](03-Состояния-и-переходы.md#сессия)).
+
+Поведение:
+
+- `startSession()` → отправляет `SessionStart`, состояние `Idle → Establishing`. Когда придёт `SessionStartAck`, состояние `Establishing → Active` и (если включён keep-alive) стартует heartbeat.
+- Если ack не пришёл за `sessionStartTimeout` — `errorOccurred` + откат в `Idle`. По умолчанию таймаут 5 секунд; `0` отключает его (ждать бесконечно).
+- `stopSession()` → отправляет `SessionStop`, проваливает все pending запросы (`SessionInactive`), состояние → `Idle`.
+- Входящий `SessionStart` от узла → автоматически отправляется `SessionStartAck`, состояние → `Active`, сигнал `sessionStartReceived`.
+- Входящий `SessionStop` → проваливает pending, состояние → `Idle`, сигнал `sessionStopReceived`.
 
 ## Keep-alive
 

@@ -33,6 +33,12 @@ set(GCM_SOURCES
     src/GChannelManager.cpp
     src/Gateway.cpp
     src/SimpleFrameCodec.cpp
+    src/internal/PendingRequests.cpp
+    src/internal/PendingRequests.h
+    src/internal/KeepAliveMonitor.cpp
+    src/internal/KeepAliveMonitor.h
+    src/internal/SessionHandshake.cpp
+    src/internal/SessionHandshake.h
 )
 
 add_library(GChannelManager SHARED
@@ -44,6 +50,8 @@ target_include_directories(GChannelManager
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 target_link_libraries(GChannelManager

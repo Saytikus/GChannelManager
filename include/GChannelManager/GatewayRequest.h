@@ -6,6 +6,7 @@
 #include "GChannelManager_global.h"
 
 class Gateway;
+namespace gcm::internal { class PendingRequests; }
 
 // =====================================================================
 //  Дескриптор отправленного запроса (по духу — как QNetworkReply).
@@ -20,6 +21,7 @@ class GCHANNELMANAGER_EXPORT GatewayRequest : public QObject
 {
     Q_OBJECT
     friend class Gateway;
+    friend class gcm::internal::PendingRequests;
 public:
     enum class Status { Pending, Succeeded, Failed };
     Q_ENUM(Status)
