@@ -1,32 +1,12 @@
-# GChannelManager — документация
+# GChannelManager — documentation
 
-**GChannelManager** — Qt6/C++20 разделяемая библиотека для построения протокольного канала связи поверх произвольного транспорта (последовательный порт, UDP, RUDP и т.п.). Главный объект — `Gateway`: он управляет состоянием канала, сессией с keep-alive, отправкой/приёмом сообщений, повторами и статистикой.
+Choose a language / Выберите язык:
 
-> [!NOTE] Где это пригодится
-> Везде, где нужен надёжный обмен короткими кадрами по нестабильной линии: телеметрия, промышленные шины, радиоканалы, протоколы команд между микроконтроллером и хостом.
+- 🇬🇧 **[English](en/README.md)** — full documentation in English
+- 🇷🇺 **[Русский](ru/README.md)** — полная документация на русском
 
-## Содержание
+---
 
-1. [Обзор](01-Обзор.md) — что это, зачем, ключевые возможности
-2. [Архитектура](02-Архитектура.md) — слои и компоненты, диаграмма
-3. [Состояния и переходы](03-Состояния-и-переходы.md) — `ChannelState`, `SessionState`
-4. [Протокол и кодек](04-Протокол-и-кодек.md) — `IMessageCodec`, формат кадра
-5. [Транспорт](05-Транспорт.md) — `ITransport` и его реализации
-6. [Gateway API](06-Gateway-API.md) — публичный интерфейс класса
-7. [Статистика](07-Статистика.md) — `GatewayStats`, `statsUpdated`
-8. [Сборка и интеграция](08-Сборка-и-интеграция.md) — CMake, опции
-9. [Тестирование](09-Тестирование.md) — Qt Test, `FakeTransport`
-10. [Руководство пользователя](10-Руководство-пользователя.md) — пошаговые примеры
+**GChannelManager** is a Qt6/C++20 shared library for building a protocol communication channel on top of an arbitrary transport (serial port, UDP, RUDP, etc.). The central object is `Gateway`. See the [English docs](en/README.md) for the full reference.
 
-## Быстрая навигация по сущностям
-
-| Сущность | Файл | Описание |
-|---|---|---|
-| `Gateway` | [Gateway API](06-Gateway-API.md) | Главный класс — управление каналом, сессией, отправкой |
-| `GatewayRequest` | [GatewayRequest](06-Gateway-API.md#gatewayrequest) | Дескриптор запроса с ожиданием ответа |
-| `GatewayStats` | [Статистика](07-Статистика.md) | POD-снимок счётчиков |
-| `ITransport` | [Транспорт](05-Транспорт.md) | Интерфейс транспорта |
-| `IMessageCodec` | [Протокол и кодек](04-Протокол-и-кодек.md) | Интерфейс кодека |
-| `SimpleFrameCodec` | [SimpleFrameCodec](04-Протокол-и-кодек.md#simpleframecodec) | Эталонный кодек (пример) |
-| `RetryPolicy` | [RetryPolicy](06-Gateway-API.md#retrypolicy) | Политика повторов |
-| `KeepAliveConfig` | [KeepAliveConfig](06-Gateway-API.md#keepaliveconfig) | Настройки heartbeat |
+**GChannelManager** — Qt6/C++20 разделяемая библиотека для построения протокольного канала связи поверх произвольного транспорта. Главный объект — `Gateway`. Полная справка — в [русской документации](ru/README.md).

@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "10-Руководство-пользователя.md",
+                "file": "en/02-Architecture.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "10-Руководство-пользователя"
+              "title": "02-Architecture"
             }
           }
         ]
@@ -185,6 +185,8 @@
   },
   "active": "b802363c04542636",
   "lastOpenFiles": [
+    "en/README.md",
+    "README.md",
     "sedkLqjen",
     "sedR6BWfl",
     "sedwyS2hF",
@@ -195,7 +197,6 @@
     "05-Транспорт.md.tmp.14680.5b8922a14b26",
     "06-Gateway-API.md.tmp.14680.08eeb1d3abfb",
     "06-Gateway-API.md.tmp.14680.ddfc6052cb30",
-    "06-Gateway-API.md.tmp.14680.c49b1b2020bf",
     "09-Тестирование.md",
     "10-Руководство-пользователя.md",
     "04-Протокол-и-кодек.md",

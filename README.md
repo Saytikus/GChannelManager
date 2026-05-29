@@ -1,50 +1,52 @@
 # GChannelManager
 
-Qt6/C++20 разделяемая библиотека для построения протокольного канала связи поверх произвольного транспорта (последовательный порт, UDP, RUDP и т.п.). Главный объект — `Gateway`: он управляет состоянием канала, сессией с keep-alive, отправкой/приёмом сообщений, повторами, кэшем ответов и статистикой.
+> 🌐 **English** | [Русский](README.ru.md)
+
+A Qt6/C++20 shared library for building a protocol communication channel on top of an arbitrary transport (serial port, UDP, RUDP, etc.). The central object is `Gateway`: it manages channel state, a keep-alive session, sending/receiving messages, retries, a reply cache and statistics.
 
 > [!NOTE]
-> Везде, где нужен надёжный обмен короткими кадрами по нестабильной линии: телеметрия, промышленные шины, радиоканалы, протоколы команд между микроконтроллером и хостом.
+> Anywhere you need reliable exchange of short frames over an unstable link: telemetry, industrial buses, radio channels, command protocols between a microcontroller and a host.
 
-## Возможности
+## Features
 
-- **Канал** — `enableChannel()`/`disableChannel()` поверх любого `ITransport`.
-- **Сессия с явными кадрами SessionStart/SessionStartAck/SessionStop** — установление и завершение не зависят от keep-alive; настраиваемый таймаут handshake.
-- **Keep-alive** — heartbeat только в `Active`, переход `Active ↔ Suspended` без переоткрытия канала (поведение в духе RUDP); включение/выключение на лету.
-- **Запрос/ответ с корреляцией** — `sendRequest(payload) → GatewayRequest*` с автоповторами и экспоненциальным backoff.
-- **Fire-and-forget отправка** — `send(payload)`, без ожидания ответа.
-- **Серверная роль** — сигнал `requestReceived` для входящих запросов от узла, слот `reply(corrId, response)`.
-- **Кэш ответов (idempotency)** — повторный запрос от узла получает сохранённый ответ автоматически, команда повторно не выполняется.
-- **Статистика** — счётчики байт/запросов/heartbeat'ов/повторов с периодическим сигналом `statsUpdated`.
-- **Чистые контракты** — `ITransport` и `IMessageCodec` отделяют гейтвей от железа и формата кадра.
+- **Channel** — `enableChannel()`/`disableChannel()` over any `ITransport`.
+- **Session with explicit SessionStart/SessionStartAck/SessionStop frames** — establishment and teardown are independent of keep-alive; configurable handshake timeout.
+- **Keep-alive** — heartbeat only in `Active`, an `Active ↔ Suspended` transition without reopening the channel (RUDP-style behavior); on/off on the fly.
+- **Request/reply with correlation** — `sendRequest(payload) → GatewayRequest*` with automatic retries and exponential backoff.
+- **Fire-and-forget sending** — `send(payload)`, with no reply expected.
+- **Server role** — a `requestReceived` signal for incoming requests from the peer, and a `reply(corrId, response)` slot.
+- **Reply cache (idempotency)** — a repeated request from the peer gets the stored reply automatically, the command is not executed again.
+- **Statistics** — counters for bytes/requests/heartbeats/retries with a periodic `statsUpdated` signal.
+- **Clean contracts** — `ITransport` and `IMessageCodec` separate the gateway from the hardware and the frame format.
 
-## Архитектура одной картинкой
+## Architecture in one picture
 
 ```mermaid
 flowchart LR
-    App["Ваше приложение"] -- сигналы / слоты --> GW["Gateway<br/>(QObject)"]
-    GW -- использует --> T["ITransport"]
-    GW -- использует --> C["IMessageCodec"]
-    T --- Serial["Serial / UDP /<br/>любой ваш транспорт"]
-    C --- Codec["SimpleFrameCodec /<br/>ваш кодек"]
+    App["Your application"] -- signals / slots --> GW["Gateway<br/>(QObject)"]
+    GW -- uses --> T["ITransport"]
+    GW -- uses --> C["IMessageCodec"]
+    T --- Serial["Serial / UDP /<br/>any transport of yours"]
+    C --- Codec["SimpleFrameCodec /<br/>your codec"]
 ```
 
-Подробная схема — [docs/02-Архитектура.md](docs/02-Архитектура.md).
+A detailed diagram — [docs/en/02-Architecture.md](docs/en/02-Architecture.md).
 
-## Сборка
+## Build
 
 ```sh
 cmake -S . -B build/Desktop-Debug -DCMAKE_BUILD_TYPE=Debug
 cmake --build build/Desktop-Debug
 ```
 
-Опциональные модули:
+Optional modules:
 
-| Опция | По умолчанию | Что собирается |
+| Option | Default | What gets built |
 |---|---|---|
-| `GCHANNELMANAGER_BUILD_EXAMPLES` | `OFF` | `examples/GChannelManagerDemo` — loopback-демо с потерями и повторами |
-| `GCHANNELMANAGER_BUILD_TESTS`    | `OFF` | юнит-тесты на Qt Test (`tst_SimpleFrameCodec`, `tst_Gateway`) |
+| `GCHANNELMANAGER_BUILD_EXAMPLES` | `OFF` | `examples/GChannelManagerDemo` — a loopback demo with losses and retries |
+| `GCHANNELMANAGER_BUILD_TESTS`    | `OFF` | unit tests on Qt Test (`tst_SimpleFrameCodec`, `tst_Gateway`) |
 
-Запустить тесты:
+Run the tests:
 
 ```sh
 cmake -S . -B build/Desktop-Debug -DGCHANNELMANAGER_BUILD_TESTS=ON
@@ -52,14 +54,14 @@ cmake --build build/Desktop-Debug
 ( cd build/Desktop-Debug && LD_LIBRARY_PATH="$PWD" ctest --output-on-failure )
 ```
 
-Подробнее — [docs/08-Сборка-и-интеграция.md](docs/08-Сборка-и-интеграция.md).
+More — [docs/en/08-Build-and-Integration.md](docs/en/08-Build-and-Integration.md).
 
-## Минимальный пример
+## Minimal example
 
 ```cpp
 #include <GChannelManager/Gateway.h>
 #include <GChannelManager/SimpleFrameCodec.h>
-#include "MySerialTransport.h"   // ваша реализация ITransport
+#include "MySerialTransport.h"   // your ITransport implementation
 
 Gateway gw;
 gw.setCodec(std::make_unique<SimpleFrameCodec>());
@@ -74,46 +76,48 @@ QObject::connect(&gw, &Gateway::sessionStateChanged,
             [](const QByteArray &resp) { qInfo() << "got" << resp; });
     });
 
-gw.enableChannel();   // дальше всё событийно
+gw.enableChannel();   // everything from here is event-driven
 ```
 
-Полный пошаговый разбор — [docs/10-Руководство-пользователя.md](docs/10-Руководство-пользователя.md).
+A full step-by-step walkthrough — [docs/en/10-User-Guide.md](docs/en/10-User-Guide.md).
 
-## Документация
+## Documentation
 
-Документация лежит в [`docs/`](docs/) и читается двумя способами:
+The documentation lives in [`docs/`](docs/), split by language, and can be read in two ways:
 
-- **На GitHub** — навигация по ссылкам ниже, Mermaid-схемы рендерятся прямо в браузере.
-- **В Obsidian** — откройте папку `docs/` как vault.
+- **On GitHub** — navigate via the links below; Mermaid diagrams render right in the browser.
+- **In Obsidian** — open the `docs/` folder as a vault.
 
-| # | Файл | О чём |
+| # | File | About |
 |---|---|---|
-| 1 | [Обзор](docs/01-Обзор.md) | Что это, зачем, ключевые возможности |
-| 2 | [Архитектура](docs/02-Архитектура.md) | Слои, компоненты, потоки, структура исходников |
-| 3 | [Состояния и переходы](docs/03-Состояния-и-переходы.md) | `ChannelState`, `SessionState`, поведение при разрыве |
-| 4 | [Протокол и кодек](docs/04-Протокол-и-кодек.md) | `IMessageCodec`, формат кадра, свой кодек |
-| 5 | [Транспорт](docs/05-Транспорт.md) | `ITransport`, `SerialConfig`/`UdpConfig`, реализации |
-| 6 | [Gateway API](docs/06-Gateway-API.md) | Полная справка по публичному API |
-| 7 | [Статистика](docs/07-Статистика.md) | `GatewayStats`, счётчики, `statsUpdated` |
-| 8 | [Сборка и интеграция](docs/08-Сборка-и-интеграция.md) | CMake, опции, экспорт, потребление |
-| 9 | [Тестирование](docs/09-Тестирование.md) | Qt Test, `FakeTransport`, паттерны тестов |
-| 10 | [Руководство пользователя](docs/10-Руководство-пользователя.md) | Пошаговый разбор с кодом |
+| 1 | [Overview](docs/en/01-Overview.md) | What it is, why, key features |
+| 2 | [Architecture](docs/en/02-Architecture.md) | Layers, components, threading, source layout |
+| 3 | [States and transitions](docs/en/03-States-and-Transitions.md) | `ChannelState`, `SessionState`, behavior on a drop |
+| 4 | [Protocol and codec](docs/en/04-Protocol-and-Codec.md) | `IMessageCodec`, frame format, your own codec |
+| 5 | [Transport](docs/en/05-Transport.md) | `ITransport`, `SerialConfig`/`UdpConfig`, implementations |
+| 6 | [Gateway API](docs/en/06-Gateway-API.md) | Complete public API reference |
+| 7 | [Statistics](docs/en/07-Statistics.md) | `GatewayStats`, counters, `statsUpdated` |
+| 8 | [Build and integration](docs/en/08-Build-and-Integration.md) | CMake, options, export, consumption |
+| 9 | [Testing](docs/en/09-Testing.md) | Qt Test, `FakeTransport`, test patterns |
+| 10 | [User guide](docs/en/10-User-Guide.md) | Step-by-step walkthrough with code |
 
-## Зависимости
+> 🌐 Russian documentation is in [`docs/ru/`](docs/ru/).
+
+## Dependencies
 
 - C++20 (GCC 10+, Clang 11+, MSVC 19.29+)
 - CMake ≥ 3.16
-- Qt 6 (`Core`, `Network`); Qt 5 поддерживается через `find_package(QT NAMES Qt6 Qt5)`
-- Для тестов — Qt Test (`Qt6::Test`)
+- Qt 6 (`Core`, `Network`); Qt 5 is supported via `find_package(QT NAMES Qt6 Qt5)`
+- For the tests — Qt Test (`Qt6::Test`)
 
-## Структура проекта
+## Project structure
 
 ```
 GChannelManager/
-├── include/GChannelManager/   ← публичные заголовки
-├── src/                       ← реализация (.so/.dll)
-├── examples/                  ← demo-loopback (GCHANNELMANAGER_BUILD_EXAMPLES=ON)
-├── tests/                     ← юнит-тесты    (GCHANNELMANAGER_BUILD_TESTS=ON)
-├── docs/                      ← документация (этот README указывает сюда)
+├── include/GChannelManager/   ← public headers
+├── src/                       ← implementation (.so/.dll)
+├── examples/                  ← demo loopback (GCHANNELMANAGER_BUILD_EXAMPLES=ON)
+├── tests/                     ← unit tests     (GCHANNELMANAGER_BUILD_TESTS=ON)
+├── docs/                      ← documentation (en/ + ru/)
 └── CMakeLists.txt
 ```

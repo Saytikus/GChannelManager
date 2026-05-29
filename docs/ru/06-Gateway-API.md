@@ -215,6 +215,63 @@ signals:
 - После `finished()` объект делает `deleteLater()`.
 - Подписку нужно делать **сразу** после `sendRequest()`, до возврата в цикл событий.
 
+## Серверная роль: входящие запросы и `reply()`
+
+Помимо отправки запросов, `Gateway` умеет **отвечать** на запросы, инициированные узлом. Когда кодек разбирает входящий кадр как `DecodedMessage::Type::Request`, гейтвей эмитит сигнал, а приложение формирует ответ слотом `reply()`.
+
+```cpp
+signals:
+    void requestReceived(quint32 correlationId, const QByteArray &payload);
+
+public slots:
+    bool reply(quint32 correlationId, const QByteArray &response);
+```
+
+- `requestReceived(corrId, payload)` — узел прислал запрос. `corrId` нужно вернуть обратно в `reply()`, чтобы узел сопоставил ответ.
+- `reply(corrId, response)` — кодирует ответ через `encodeReply(corrId, response)` и отправляет в транспорт. Возвращает `true`, если кадр поставлен в очередь (кодек установлен, транспорт открыт). Если включён кэш ответов — ответ дополнительно запоминается.
+
+```cpp
+connect(&gw, &Gateway::requestReceived, this,
+    [&](quint32 corrId, const QByteArray &payload) {
+        const QByteArray result = handleCommand(payload);
+        gw.reply(corrId, result);
+    });
+```
+
+## Кэш ответов (серверная роль)
+
+Линия ненадёжна, и наш ответ может потеряться по дороге — тогда узел повторит тот же `Request` с тем же `corrId`. Кэш ответов (idempotency cache) хранит каждый успешно отправленный `reply()`; при повторном запросе с известным `corrId` гейтвей сам перешлёт сохранённый ответ и **не** будет повторно эмитить `requestReceived` (команда не выполнится дважды).
+
+### ReplyCacheConfig
+
+```cpp
+struct ReplyCacheConfig {
+    bool   enabled    = false;   // по умолчанию выключен
+    qint32 maxEntries = 256;     // эвикция LRU поверх QCache
+};
+```
+
+### API
+
+```cpp
+void setReplyCacheConfig(const ReplyCacheConfig &c);
+[[nodiscard]] ReplyCacheConfig replyCacheConfig() const;
+[[nodiscard]] bool isReplyCacheEnabled() const;
+void clearReplyCache();
+
+public slots:
+    void setReplyCacheEnabled(bool enabled);   // вкл/выкл на лету
+
+signals:
+    void replyCacheEnabledChanged(bool enabled);
+```
+
+- `setReplyCacheConfig(...)` / `setReplyCacheEnabled(bool)` работают **на лету**. Выключение кэша очищает накопленные записи.
+- Повторная отправка из кэша учитывается счётчиком `stats.cachedRepliesResent` (см. [Статистика](07-Статистика.md)).
+
+> [!NOTE]
+> Кэш по умолчанию выключен: включайте его только если ваш протокол допускает повтор запроса узлом и идемпотентность ответа важна.
+
 ## Статистика
 
 ```cpp
