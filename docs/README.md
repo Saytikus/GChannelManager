@@ -1,5 +1,8 @@
 # GChannelManager — documentation
 
+> [!WARNING]
+> **Vibe-coded project / Проект во «vibe coding».** This library — and this documentation — was written end-to-end with an AI assistant and is not battle-tested in production. / Эта библиотека и документация целиком сгенерированы ИИ-ассистентом и не обкатаны в продакшене. Read the code and test thoroughly before relying on it. / Внимательно читайте код и тщательно тестируйте перед использованием.
+
 Choose a language / Выберите язык:
 
 - 🇬🇧 **[English](en/README.md)** — full documentation in English

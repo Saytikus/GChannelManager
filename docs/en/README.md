@@ -2,6 +2,9 @@
 
 > 🌐 **English** | [Русский](../ru/README.md)
 
+> [!WARNING]
+> **Vibe-coded project.** This library was written end-to-end by "vibe coding" — generated almost entirely with an AI assistant, including this documentation. It has **not** been battle-tested in production. Read the code and test it thoroughly before relying on it.
+
 **GChannelManager** is a Qt6/C++20 shared library for building a protocol communication channel on top of an arbitrary transport (serial port, UDP, RUDP, etc.). The central object is `Gateway`: it manages channel state, a keep-alive session, sending/receiving messages, retries and statistics.
 
 > [!NOTE] Where it fits
