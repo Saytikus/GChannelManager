@@ -11,9 +11,9 @@ using gcm::internal::PendingRequests;
 using gcm::internal::SessionHandshake;
 
 // ---------------------------------------------------------------------
-//  Конструктор: создаём коллабораторов и связываем их сигналы со
-//  счётчиками статистики Gateway. Все коллабораторы — QObject, владение
-//  через std::unique_ptr (без Qt parent — чтобы избежать двойного владения).
+//  Constructor: create the collaborators and wire their signals to the
+//  Gateway statistics counters. All collaborators are QObjects, owned via
+//  std::unique_ptr (no Qt parent — to avoid double ownership).
 // ---------------------------------------------------------------------
 Gateway::Gateway(QObject *parent)
     : QObject(parent)
@@ -21,7 +21,7 @@ Gateway::Gateway(QObject *parent)
     , m_keepAlive(std::make_unique<KeepAliveMonitor>())
     , m_handshake(std::make_unique<SessionHandshake>())
 {
-    // Статистика на основе сигналов коллабораторов.
+    // Statistics driven by the collaborators' signals.
     connect(m_requests.get(), &PendingRequests::bytesPushed,
             this, [this](qint64 b) { m_stats.sentBytes += quint64(b); });
     connect(m_requests.get(), &PendingRequests::retryStarted,
@@ -56,7 +56,7 @@ Gateway::Gateway(QObject *parent)
                 if (m_session != SessionState::Establishing)
                     return;
                 m_stats.sessionStartTimeouts += 1;
-                emit errorOccurred(QStringLiteral("startSession: SessionStartAck не получен в срок"));
+                emit errorOccurred(QStringLiteral("startSession: SessionStartAck not received in time"));
                 setSessionState(SessionState::Idle);
             });
 
@@ -68,7 +68,7 @@ Gateway::Gateway(QObject *parent)
 Gateway::~Gateway() = default;
 
 // ---------------------------------------------------------------------
-//  Установка транспорта / кодека
+//  Installing the transport / codec
 // ---------------------------------------------------------------------
 void Gateway::setTransport(std::unique_ptr<ITransport> transport)
 {
@@ -112,7 +112,7 @@ void Gateway::propagateCodec()
 }
 
 // ---------------------------------------------------------------------
-//  Конфигурация — проксируется коллабораторам
+//  Configuration — proxied to the collaborators
 // ---------------------------------------------------------------------
 void Gateway::setDefaultRetryPolicy(const RetryPolicy &p) { m_requests->setDefaultPolicy(p); }
 Gateway::RetryPolicy Gateway::defaultRetryPolicy() const  { return m_requests->defaultPolicy(); }
@@ -136,10 +136,10 @@ void Gateway::setKeepAliveConfig(const KeepAliveConfig &k)
     m_keepAlive->setConfig(k);
 
     if (m_session == SessionState::Active && !wasEnabled && k.enabled) {
-        // включили heartbeat в работающей сессии
+        // enabled heartbeat in a running session
         m_keepAlive->start();
     } else if (wasEnabled && !k.enabled && m_session == SessionState::Suspended) {
-        // выключили heartbeat в Suspended — нечем выявить разрыв, считаем линк живым
+        // disabled heartbeat while Suspended — nothing detects a drop, treat the link as alive
         setSessionState(SessionState::Active);
     }
 
@@ -157,12 +157,12 @@ void Gateway::setKeepAliveEnabled(bool enabled)
 }
 
 // ---------------------------------------------------------------------
-//  Канал
+//  Channel
 // ---------------------------------------------------------------------
 void Gateway::enableChannel()
 {
     if (!m_transport) {
-        emit errorOccurred(QStringLiteral("enableChannel: транспорт не установлен"));
+        emit errorOccurred(QStringLiteral("enableChannel: transport not set"));
         return;
     }
     if (isChannelEnabled())
@@ -200,18 +200,18 @@ void Gateway::onTransportError(const QString &msg)
 }
 
 // ---------------------------------------------------------------------
-//  Сессия
+//  Session
 // ---------------------------------------------------------------------
 void Gateway::startSession()
 {
     if (!isChannelEnabled()) {
-        emit errorOccurred(QStringLiteral("startSession: канал не включён"));
+        emit errorOccurred(QStringLiteral("startSession: channel not enabled"));
         return;
     }
     if (m_session == SessionState::Active || m_session == SessionState::Establishing)
         return;
     if (!m_codec) {
-        emit errorOccurred(QStringLiteral("startSession: кодек не установлен"));
+        emit errorOccurred(QStringLiteral("startSession: codec not set"));
         return;
     }
 
@@ -251,7 +251,7 @@ void Gateway::enterActiveState()
 }
 
 // ---------------------------------------------------------------------
-//  Приём данных
+//  Receiving data
 // ---------------------------------------------------------------------
 void Gateway::onTransportBytes(const QByteArray &bytes)
 {
@@ -321,24 +321,24 @@ void Gateway::onTransportBytes(const QByteArray &bytes)
 }
 
 // ---------------------------------------------------------------------
-//  reply (+ idempotency-кэш)
+//  reply (+ idempotency cache)
 // ---------------------------------------------------------------------
 bool Gateway::reply(quint32 correlationId, const QByteArray &response)
 {
     if (!m_codec) {
-        emit errorOccurred(QStringLiteral("reply: кодек не установлен"));
+        emit errorOccurred(QStringLiteral("reply: codec not set"));
         return false;
     }
     if (!isChannelEnabled()) {
-        emit errorOccurred(QStringLiteral("reply: канал не включён"));
+        emit errorOccurred(QStringLiteral("reply: channel not enabled"));
         return false;
     }
     if (m_session == SessionState::Idle || m_session == SessionState::Stopping) {
-        emit errorOccurred(QStringLiteral("reply: сессия не активна"));
+        emit errorOccurred(QStringLiteral("reply: session not active"));
         return false;
     }
     if (!m_transport || !m_transport->isOpen()) {
-        emit errorOccurred(QStringLiteral("reply: транспорт закрыт"));
+        emit errorOccurred(QStringLiteral("reply: transport closed"));
         return false;
     }
     const QByteArray frame = m_codec->encodeReply(correlationId, response);
@@ -386,19 +386,19 @@ void Gateway::clearReplyCache()
 bool Gateway::send(const QByteArray &payload)
 {
     if (!m_codec) {
-        emit errorOccurred(QStringLiteral("send: кодек не установлен"));
+        emit errorOccurred(QStringLiteral("send: codec not set"));
         return false;
     }
     if (!isChannelEnabled()) {
-        emit errorOccurred(QStringLiteral("send: канал не включён"));
+        emit errorOccurred(QStringLiteral("send: channel not enabled"));
         return false;
     }
     if (m_session == SessionState::Idle || m_session == SessionState::Stopping) {
-        emit errorOccurred(QStringLiteral("send: сессия не активна"));
+        emit errorOccurred(QStringLiteral("send: session not active"));
         return false;
     }
     if (!m_transport || !m_transport->isOpen()) {
-        emit errorOccurred(QStringLiteral("send: транспорт закрыт"));
+        emit errorOccurred(QStringLiteral("send: transport closed"));
         return false;
     }
     const QByteArray frame = m_codec->encodeData(payload);
@@ -410,7 +410,7 @@ bool Gateway::send(const QByteArray &payload)
 }
 
 // ---------------------------------------------------------------------
-//  Запрос с ожиданием ответа — делегация PendingRequests
+//  Send and await a reply — delegated to PendingRequests
 // ---------------------------------------------------------------------
 GatewayRequest *Gateway::sendRequest(const QByteArray &payload)
 {
@@ -431,7 +431,7 @@ GatewayRequest *Gateway::sendRequest(const QByteArray &payload, const RetryPolic
 }
 
 // ---------------------------------------------------------------------
-//  Статистика
+//  Statistics
 // ---------------------------------------------------------------------
 void Gateway::setStatsInterval(std::chrono::milliseconds interval)
 {
@@ -448,7 +448,7 @@ void Gateway::resetStats()
 }
 
 // ---------------------------------------------------------------------
-//  Переходы состояний
+//  State transitions
 // ---------------------------------------------------------------------
 void Gateway::setChannelState(ChannelState s)
 {

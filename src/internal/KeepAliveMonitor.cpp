@@ -44,7 +44,7 @@ void KeepAliveMonitor::start()
     m_missed   = 0;
     m_exceeded = false;
     m_timer->start(qint32(m_config.interval.count()));
-    onTick();   // первый heartbeat — сразу
+    onTick();   // first heartbeat — immediately
 }
 
 void KeepAliveMonitor::stop()

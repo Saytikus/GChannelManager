@@ -15,7 +15,7 @@ quint32 PendingRequests::nextId()
 {
     quint32 id = m_nextId++;
     if (m_nextId == 0)
-        m_nextId = 1;          // 0 зарезервирован под keep-alive / fire-and-forget
+        m_nextId = 1;          // 0 is reserved for keep-alive / fire-and-forget
     return id;
 }
 
@@ -36,8 +36,8 @@ GatewayRequest *PendingRequests::enqueue(const QByteArray &payload, const RetryP
     req->m_maxAttempts = 1 + policy.maxRetries;
 
     if (!m_codec) {
-        // не должно случиться при правильной последовательности вызовов Gateway,
-        // но защитимся.
+        // should not happen given the correct Gateway call sequence,
+        // but guard against it.
         return createPreflightFailed(GatewayRequest::Error::TransportError);
     }
 
@@ -55,8 +55,8 @@ GatewayRequest *PendingRequests::enqueue(const QByteArray &payload, const RetryP
 
     m_pending.insert(id, p);
 
-    // Первая отправка — следующая итерация event loop'а: вызывающий
-    // должен успеть подключить succeeded/failed/retrying.
+    // First send on the next event-loop iteration: the caller must have
+    // time to connect succeeded/failed/retrying.
     QTimer::singleShot(0, this, [this, id] { startAttempt(id); });
     return req;
 }
@@ -64,7 +64,7 @@ GatewayRequest *PendingRequests::enqueue(const QByteArray &payload, const RetryP
 GatewayRequest *PendingRequests::createPreflightFailed(GatewayRequest::Error err)
 {
     auto *req = new GatewayRequest(this);
-    req->m_id = 0;   // префлайт-неудача — никакой корреляции нет
+    req->m_id = 0;   // preflight failure — there is no correlation
     QTimer::singleShot(0, this, [this, req, err] {
         req->m_status = GatewayRequest::Status::Failed;
         req->m_error  = err;

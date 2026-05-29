@@ -5,11 +5,11 @@
 #include <chrono>
 
 // =====================================================================
-//  Конфигурация транспортов.
-//  Эти структуры передаются в конструктор конкретного транспорта:
+//  Transport configuration.
+//  These structures are passed to a concrete transport's constructor:
 //      auto t = std::make_unique<SerialTransport>(SerialConfig{...});
-//  Здесь — только данные, без зависимости от QtSerialPort, чтобы
-//  контракт оставался "лёгким".
+//  Here — data only, with no dependency on QtSerialPort, so that the
+//  contract stays "light".
 // =====================================================================
 namespace transport {
 
@@ -31,10 +31,10 @@ struct SerialConfig {
 
 struct UdpConfig {
     QHostAddress localAddress  = QHostAddress::AnyIPv4;
-    quint16      localPort     = 0;       // 0 — любой свободный
-    QHostAddress remoteAddress;           // адрес узла назначения
+    quint16      localPort     = 0;       // 0 — any free port
+    QHostAddress remoteAddress;           // destination peer address
     quint16      remotePort    = 0;
-    bool         bindBeforeSend = true;   // привязать сокет при open()
+    bool         bindBeforeSend = true;   // bind the socket on open()
 };
 
 } // namespace transport

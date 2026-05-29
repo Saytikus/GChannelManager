@@ -4,23 +4,23 @@
 #include <QtGlobal>
 
 // =====================================================================
-//  Результат разбора одного сообщения кодеком.
-//  type определяет, как поле payload (и correlationId для Reply) должно
-//  интерпретироваться вызывающим кодом.
+//  The result of decoding a single message from the codec.
+//  `type` determines how the `payload` field (and `correlationId` for
+//  Reply) is to be interpreted by the calling code.
 // =====================================================================
 struct DecodedMessage {
     enum class Type {
-        Reply,            // ответ на наш запрос -> смотрим correlationId
-        Request,          // запрос от узла к нам -> приложение отвечает Gateway::reply()
-        SessionStart,     // узел инициирует сессию (мы должны отвечать SessionStartAck)
-        SessionStartAck,  // узел подтвердил наш SessionStart (мы переходим в Active)
-        SessionStop,      // узел завершает сессию
-        KeepAlive,        // keep-alive (подтверждение живости линка)
-        Data,             // данные без корреляции (push от узла)
-        Unknown           // не распознано / служебное
+        Reply,            // reply to our request -> look at correlationId
+        Request,          // request from the peer to us -> app answers via Gateway::reply()
+        SessionStart,     // peer initiates a session (we must answer with SessionStartAck)
+        SessionStartAck,  // peer acknowledged our SessionStart (we move to Active)
+        SessionStop,      // peer ends the session
+        KeepAlive,        // keep-alive (link liveness confirmation)
+        Data,             // data without correlation (push from the peer)
+        Unknown           // unrecognized / service
     };
 
     Type       type          = Type::Unknown;
-    quint32    correlationId = 0;   // valid для Reply и Request
+    quint32    correlationId = 0;   // valid for Reply and Request
     QByteArray payload;
 };

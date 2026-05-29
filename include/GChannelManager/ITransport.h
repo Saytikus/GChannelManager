@@ -7,23 +7,23 @@
 #include "GChannelManager_global.h"
 
 // =====================================================================
-//  Контракт транспорта.
-//  Реализации (сериал-порт, UDP, RUDP...) пишутся отдельно и НЕ входят
-//  в этот файл. Гейтвей знает только об этом интерфейсе.
+//  The transport contract.
+//  Implementations (serial port, UDP, RUDP...) are written separately
+//  and are NOT part of this file. The gateway only knows this interface.
 //
-//  Транспорт асинхронный: send() лишь ставит данные в очередь отправки,
-//  а входящие байты приходят через сигнал bytesReceived().
+//  The transport is asynchronous: send() merely queues data for sending,
+//  while incoming bytes arrive through the bytesReceived() signal.
 // =====================================================================
 class GCHANNELMANAGER_EXPORT ITransport : public QObject
 {
     Q_OBJECT
 public:
     enum class State {
-        Closed,   // закрыт
-        Opening,  // открывается
-        Open,     // готов к обмену
-        Closing,  // закрывается
-        Error     // ошибка
+        Closed,   // closed
+        Opening,  // opening
+        Open,     // ready to exchange
+        Closing,  // closing
+        Error     // error
     };
     Q_ENUM(State)
 
@@ -31,22 +31,22 @@ public:
     ~ITransport() override = default;
 
     [[nodiscard]] virtual State   state() const = 0;
-    [[nodiscard]] virtual QString name()  const = 0;   // для логов/диагностики
+    [[nodiscard]] virtual QString name()  const = 0;   // for logs/diagnostics
     [[nodiscard]] bool isOpen() const { return state() == State::Open; }
 
 public slots:
-    // Открыть/закрыть канал связи. Асинхронно: результат — через opened()/closed().
+    // Open/close the communication channel. Asynchronous: the result comes via opened()/closed().
     virtual void open()  = 0;
     virtual void close() = 0;
 
-    // Поставить данные в очередь отправки.
-    // Возвращает кол-во принятых байт или -1 при ошибке.
+    // Queue data for sending.
+    // Returns the number of accepted bytes, or -1 on error.
     virtual qint64 send(const QByteArray &data) = 0;
 
 signals:
     void stateChanged(ITransport::State state);
     void opened();
     void closed();
-    void bytesReceived(const QByteArray &data);   // сырые входящие байты
+    void bytesReceived(const QByteArray &data);   // raw incoming bytes
     void errorOccurred(const QString &message);
 };

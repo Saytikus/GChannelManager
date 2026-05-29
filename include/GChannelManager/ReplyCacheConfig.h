@@ -3,15 +3,15 @@
 #include <QtGlobal>
 
 // =====================================================================
-//  Кэш ответов (idempotency cache).
+//  Reply cache (idempotency cache).
 //
-//  Если включён — Gateway запоминает каждый успешно отправленный
-//  Gateway::reply(corrId, response). Если узел повторно пришлёт Request
-//  с тем же corrId (потому что наш ответ потерялся по дороге), Gateway
-//  сам перешлёт сохранённый ответ, НЕ эмитя requestReceived заново.
+//  When enabled, the Gateway remembers every successfully sent
+//  Gateway::reply(corrId, response). If the peer resends a Request with
+//  the same corrId (because our reply was lost on the way), the Gateway
+//  resends the stored reply itself, WITHOUT re-emitting requestReceived.
 //
-//  Эвикция — LRU на основе QCache, до maxEntries записей.
-//  По умолчанию выключен.
+//  Eviction is LRU, backed by QCache, up to maxEntries entries.
+//  Disabled by default.
 // =====================================================================
 struct ReplyCacheConfig {
     bool   enabled    = false;

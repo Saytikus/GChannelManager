@@ -7,9 +7,9 @@
 #include "IMessageCodec.h"
 
 // =====================================================================
-//  ПРИМЕР кодека (НЕ часть контракта — замените своим протоколом).
+//  EXAMPLE codec (NOT part of the contract — replace with your protocol).
 //
-//  Формат кадра (little-endian):
+//  Frame format (little-endian):
 //    [magic u8 = 0xA5][type u8][corrId u32][len u32][payload ...]
 // =====================================================================
 class GCHANNELMANAGER_EXPORT SimpleFrameCodec final : public IMessageCodec
@@ -38,11 +38,11 @@ public:
     [[nodiscard]] std::vector<DecodedMessage> feed(const QByteArray &bytes) override;
     void reset() override { m_buf.clear(); }
 
-    // --- утилиты, переиспользуемые в т.ч. демо-узлом ---
+    // --- utilities, reused e.g. by the demo peer ---
     struct RawFrame { quint8 type = 0; quint32 corrId = 0; QByteArray payload; };
     [[nodiscard]] static QByteArray makeFrame(quint8 type, quint32 corrId,
                                               const QByteArray &payload);
-    [[nodiscard]] static std::vector<RawFrame> parse(QByteArray &buffer);   // потребляет разобранное из buffer
+    [[nodiscard]] static std::vector<RawFrame> parse(QByteArray &buffer);   // consumes what it parses from buffer
 
 private:
     QByteArray m_buf;

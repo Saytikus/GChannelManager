@@ -7,10 +7,10 @@
 #include <GChannelManager/SimpleFrameCodec.h>
 
 // =====================================================================
-//  ДЕМО-ТРАНСПОРТ — НЕ часть контракта.
-//  Имитирует узел-ответчик: отвечает на запросы и keep-alive,
-//  случайно "теряет" ~40% запросов, чтобы было видно работу повторов.
-//  Ваш реальный SerialTransport/UdpTransport реализует тот же ITransport.
+//  DEMO TRANSPORT — NOT part of the contract.
+//  Simulates a responder peer: answers requests and keep-alives, and
+//  randomly "drops" ~40% of requests so the retry logic is visible.
+//  Your real SerialTransport/UdpTransport implements the same ITransport.
 // =====================================================================
 class DemoPeerTransport : public ITransport
 {
@@ -46,11 +46,11 @@ public slots:
             } else if (f.type == SimpleFrameCodec::SessionStart) {
                 respond(SimpleFrameCodec::makeFrame(SimpleFrameCodec::SessionStartAck, 0, {}), 10);
             } else if (f.type == SimpleFrameCodec::SessionStop) {
-                // ничего — мы peer, узел сообщил что завершает сессию
+                // nothing — we are the peer, the node told us it is ending the session
             } else if (f.type == SimpleFrameCodec::Request) {
                 if (QRandomGenerator::global()->bounded(100) < 40) {
                     qInfo() << "[peer] drop request" << f.corrId;
-                    continue;                                   // потеря пакета
+                    continue;                                   // packet loss
                 }
                 const QByteArray reply = QByteArray("ACK:") + f.payload;
                 respond(SimpleFrameCodec::makeFrame(SimpleFrameCodec::Reply, f.corrId, reply), 30);
@@ -80,21 +80,21 @@ int main(int argc, char **argv)
 
     Gateway gw;
 
-    // 1) кодек протокола
+    // 1) protocol codec
     gw.setCodec(std::make_unique<SimpleFrameCodec>());
 
-    // 2) создать -> сконфигурировать -> установить транспорт
-    //    (реально это был бы SerialTransport{SerialConfig{...}} и т.п.)
+    // 2) create -> configure -> install the transport
+    //    (in reality this would be SerialTransport{SerialConfig{...}} etc.)
     gw.setTransport(std::make_unique<DemoPeerTransport>());
 
-    // 3) настройка повторов
+    // 3) retry configuration
     Gateway::RetryPolicy retry;
     retry.maxRetries    = 4;
     retry.timeout       = std::chrono::milliseconds(300);
     retry.backoffFactor = 1.5;
     gw.setDefaultRetryPolicy(retry);
 
-    // 4) настройка keep-alive (поддержка редкой связи)
+    // 4) keep-alive configuration (support for a rare link)
     Gateway::KeepAliveConfig ka;
     ka.enabled   = true;
     ka.interval  = std::chrono::milliseconds(1000);
@@ -133,7 +133,7 @@ int main(int argc, char **argv)
 
     gw.enableChannel();
 
-    // демонстрация управления keep-alive на лету:
+    // demonstrate controlling keep-alive on the fly:
     QTimer::singleShot(3500, &gw, [&] { gw.setKeepAliveEnabled(false); });
     QTimer::singleShot(5500, &gw, [&] { gw.setKeepAliveEnabled(true);  });
 

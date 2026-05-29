@@ -4,12 +4,12 @@
 #include <chrono>
 
 // =====================================================================
-//  Конфигурация keep-alive (поддержка редкой/нестабильной связи).
-//  Применяется через Gateway::setKeepAliveConfig() — изменения подхватываются
-//  на лету в работающей сессии (старт/стоп heartbeat, смена интервала).
+//  Keep-alive configuration (support for a rare/unstable link).
+//  Applied via Gateway::setKeepAliveConfig() — changes are picked up
+//  on the fly in a running session (start/stop heartbeat, interval change).
 // =====================================================================
 struct KeepAliveConfig {
     bool   enabled = true;
     std::chrono::milliseconds interval{2000};
-    qint32 maxMissed = 3;   // пропусков подряд до перехода в Suspended
+    qint32 maxMissed = 3;   // misses in a row before going Suspended
 };

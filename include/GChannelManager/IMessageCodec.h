@@ -7,44 +7,44 @@
 #include "DecodedMessage.h"
 
 // =====================================================================
-//  Контракт кодека протокольного уровня.
+//  The protocol-level codec contract.
 //
-//  Гейтвей сам не знает формат кадров вашего протокола. Кодек:
-//    * упаковывает запрос в кадр, вшивая correlationId (для сопоставления
-//      ответа с запросом при "отправке с ожиданием ответа");
-//    * формирует keep-alive кадр;
-//    * разбирает входящий поток байт на сообщения и классифицирует их.
+//  The gateway itself does not know your protocol's frame format. The codec:
+//    * packs a request into a frame, embedding the correlationId (to match
+//      a reply to its request during "send and await a reply");
+//    * builds a keep-alive frame;
+//    * parses the incoming byte stream into messages and classifies them.
 //
-//  feed() должен буферизовать неполные кадры между вызовами.
+//  feed() must buffer incomplete frames between calls.
 // =====================================================================
 class IMessageCodec {
 public:
     virtual ~IMessageCodec() = default;
 
-    // Упаковать запрос в кадр.
+    // Pack a request into a frame.
     [[nodiscard]] virtual QByteArray encodeRequest(quint32 correlationId,
                                                    const QByteArray &payload) = 0;
 
-    // Упаковать ответ на входящий запрос — корреляция совпадает с запросом.
-    // Используется Gateway::reply().
+    // Pack a reply to an incoming request — correlation matches the request.
+    // Used by Gateway::reply().
     [[nodiscard]] virtual QByteArray encodeReply(quint32 correlationId,
                                                  const QByteArray &payload) = 0;
 
-    // Упаковать "несвязанные" данные (fire-and-forget): корреляция не нужна,
-    // ответа не ожидается. Используется Gateway::send().
+    // Pack "uncorrelated" data (fire-and-forget): no correlation needed,
+    // no reply expected. Used by Gateway::send().
     [[nodiscard]] virtual QByteArray encodeData(const QByteArray &payload) = 0;
 
-    // Кадры жизненного цикла сессии — отдельный канал от keep-alive.
+    // Session-lifecycle frames — a channel separate from keep-alive.
     [[nodiscard]] virtual QByteArray encodeSessionStart()    = 0;
     [[nodiscard]] virtual QByteArray encodeSessionStartAck() = 0;
     [[nodiscard]] virtual QByteArray encodeSessionStop()     = 0;
 
-    // Сформировать keep-alive кадр.
+    // Build a keep-alive frame.
     [[nodiscard]] virtual QByteArray encodeKeepAlive() = 0;
 
-    // Скормить сырые байты, получить список разобранных сообщений.
+    // Feed raw bytes, get back a list of decoded messages.
     [[nodiscard]] virtual std::vector<DecodedMessage> feed(const QByteArray &bytes) = 0;
 
-    // Сбросить внутренний буфер (например, при разрыве/рестарте сессии).
+    // Reset the internal buffer (e.g. on a link drop / session restart).
     virtual void reset() {}
 };

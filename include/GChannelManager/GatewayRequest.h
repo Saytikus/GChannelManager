@@ -9,13 +9,13 @@ class Gateway;
 namespace gcm::internal { class PendingRequests; }
 
 // =====================================================================
-//  Дескриптор отправленного запроса (по духу — как QNetworkReply).
+//  Descriptor of a sent request (in spirit — like QNetworkReply).
 //
-//  Возвращается из Gateway::sendRequest(). Подписывайтесь на его сигналы
-//  сразу после получения указателя. Объект живёт до завершения и сам
-//  вызывает deleteLater() после finished().
+//  Returned from Gateway::sendRequest(). Connect to its signals right
+//  after receiving the pointer. The object lives until completion and
+//  calls deleteLater() on itself after finished().
 //
-//  Создаётся только гейтвеем (конструктор приватный, Gateway — friend).
+//  Created only by the gateway (private constructor, Gateway is a friend).
 // =====================================================================
 class GCHANNELMANAGER_EXPORT GatewayRequest : public QObject
 {
@@ -28,16 +28,16 @@ public:
 
     enum class Error {
         None,
-        Timeout,          // исчерпаны повторы
-        Cancelled,        // отменён пользователем
-        ChannelDisabled,  // канал выключен / транспорт закрыт
-        SessionInactive,  // сессия не запущена
-        TransportError    // нет кодека / ошибка отправки
+        Timeout,          // retries exhausted
+        Cancelled,        // cancelled by the user
+        ChannelDisabled,  // channel off / transport closed
+        SessionInactive,  // session not started
+        TransportError    // no codec / send error
     };
     Q_ENUM(Error)
 
     [[nodiscard]] quint32          id()          const { return m_id; }
-    [[nodiscard]] qint32           attempts()    const { return m_attempts; }    // сделано попыток
+    [[nodiscard]] qint32           attempts()    const { return m_attempts; }    // attempts made
     [[nodiscard]] qint32           maxAttempts() const { return m_maxAttempts; } // 1 + maxRetries
     [[nodiscard]] Status           status()      const { return m_status; }
     [[nodiscard]] Error            error()       const { return m_error; }
@@ -51,10 +51,10 @@ public slots:
 signals:
     void succeeded(const QByteArray &response);
     void failed(GatewayRequest::Error error);
-    void retrying(qint32 attempt);   // началась повторная отправка №attempt
-    void finished();              // ровно один раз, после succeeded/failed
+    void retrying(qint32 attempt);   // resend no. `attempt` has begun
+    void finished();              // exactly once, after succeeded/failed
 
-    // внутренний: гейтвей слушает его, чтобы обработать отмену
+    // internal: the gateway listens to this to handle cancellation
     void cancelRequested();
 
 private:

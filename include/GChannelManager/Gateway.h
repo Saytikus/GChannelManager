@@ -24,16 +24,16 @@ class SessionHandshake;
 }
 
 // =====================================================================
-//  Gateway — координатор протокольного слоя.
+//  Gateway — coordinator of the protocol layer.
 //
-//  Сам по себе не содержит логики корреляции / heartbeat / handshake —
-//  делегирует это трём коллабораторам (PendingRequests, KeepAliveMonitor,
-//  SessionHandshake). Gateway отвечает только за:
-//    * установку транспорта/кодека и проксирование их сигналов,
-//    * машины состояний (ChannelState и SessionState),
-//    * координацию обработки входящего DecodedMessage::Type,
-//    * fire-and-forget send и reply на входящие запросы (+ idempotency-кэш),
-//    * сбор и публикацию статистики (GatewayStats).
+//  It holds no correlation / heartbeat / handshake logic itself — it
+//  delegates that to three collaborators (PendingRequests, KeepAliveMonitor,
+//  SessionHandshake). Gateway is responsible only for:
+//    * installing the transport/codec and proxying their signals,
+//    * the state machines (ChannelState and SessionState),
+//    * coordinating handling of incoming DecodedMessage::Type,
+//    * fire-and-forget send and reply to incoming requests (+ idempotency cache),
+//    * collecting and publishing statistics (GatewayStats).
 // =====================================================================
 class GCHANNELMANAGER_EXPORT Gateway : public QObject
 {
@@ -43,15 +43,15 @@ public:
     Q_ENUM(ChannelState)
 
     enum class SessionState {
-        Idle,          // сессии нет
-        Establishing,  // отправлен SessionStart, ждём SessionStartAck
-        Active,        // сессия установлена
-        Suspended,     // линк временно пропал (RUDP-режим), запросы ждут
-        Stopping       // останавливается
+        Idle,          // no session
+        Establishing,  // SessionStart sent, waiting for SessionStartAck
+        Active,        // session established
+        Suspended,     // link temporarily lost (RUDP mode), requests wait
+        Stopping       // stopping
     };
     Q_ENUM(SessionState)
 
-    // Сохраняем привычные имена `Gateway::RetryPolicy` / `Gateway::KeepAliveConfig`.
+    // Keep the familiar names `Gateway::RetryPolicy` / `Gateway::KeepAliveConfig`.
     using RetryPolicy      = ::RetryPolicy;
     using KeepAliveConfig  = ::KeepAliveConfig;
     using ReplyCacheConfig = ::ReplyCacheConfig;
@@ -59,14 +59,14 @@ public:
     explicit Gateway(QObject *parent = nullptr);
     ~Gateway() override;
 
-    // ---- установка транспорта и кодека ----
-    void setTransport(std::unique_ptr<ITransport> transport);   // гейтвей становится владельцем
+    // ---- installing transport and codec ----
+    void setTransport(std::unique_ptr<ITransport> transport);   // the gateway takes ownership
     [[nodiscard]] ITransport *transport() const { return m_transport.get(); }
 
     void setCodec(std::unique_ptr<IMessageCodec> codec);
     [[nodiscard]] IMessageCodec *codec() const { return m_codec.get(); }
 
-    // ---- конфигурация ----
+    // ---- configuration ----
     void setDefaultRetryPolicy(const RetryPolicy &p);
     [[nodiscard]] RetryPolicy defaultRetryPolicy() const;
 
@@ -74,52 +74,52 @@ public:
     [[nodiscard]] KeepAliveConfig keepAliveConfig() const;
     [[nodiscard]] bool isKeepAliveEnabled() const;
 
-    // Таймаут ожидания SessionStartAck (0 — без таймаута, ждём бесконечно).
+    // SessionStartAck wait timeout (0 — no timeout, wait forever).
     void setSessionStartTimeout(std::chrono::milliseconds timeout);
     [[nodiscard]] std::chrono::milliseconds sessionStartTimeout() const;
 
-    // Кэш ответов на входящие запросы — для повторов от узла.
+    // Cache of replies to incoming requests — for resends from the peer.
     void setReplyCacheConfig(const ReplyCacheConfig &c);
     [[nodiscard]] ReplyCacheConfig replyCacheConfig() const { return m_replyCacheConfig; }
     [[nodiscard]] bool isReplyCacheEnabled() const { return m_replyCacheConfig.enabled; }
     void clearReplyCache();
 
-    // ---- состояния ----
+    // ---- states ----
     [[nodiscard]] ChannelState channelState()  const { return m_channel; }
     [[nodiscard]] SessionState sessionState()  const { return m_session; }
     [[nodiscard]] bool isChannelEnabled()      const { return m_channel == ChannelState::Enabled; }
     [[nodiscard]] bool isSessionActive()       const { return m_session == SessionState::Active; }
 
-    // ---- статистика ----
+    // ---- statistics ----
     [[nodiscard]] GatewayStats stats() const { return m_stats; }
     void setStatsInterval(std::chrono::milliseconds interval);
     [[nodiscard]] std::chrono::milliseconds statsInterval() const { return m_statsInterval; }
 
 public slots:
-    // канал
+    // channel
     void enableChannel();
     void disableChannel();
 
-    // сессия
+    // session
     void startSession();
     void stopSession();
 
-    // keep-alive on/off в работающей сессии
+    // keep-alive on/off in a running session
     void setKeepAliveEnabled(bool enabled);
 
-    // кэш ответов on/off в работающей сессии
+    // reply cache on/off in a running session
     void setReplyCacheEnabled(bool enabled);
 
-    // ответ на входящий запрос (см. requestReceived)
+    // reply to an incoming request (see requestReceived)
     bool reply(quint32 correlationId, const QByteArray &response);
 
-    // сбросить все счётчики статистики в 0
+    // reset all statistics counters to 0
     void resetStats();
 
-    // отправка БЕЗ ожидания ответа (fire-and-forget)
+    // send WITHOUT awaiting a reply (fire-and-forget)
     bool send(const QByteArray &payload);
 
-    // отправка с ожиданием ответа
+    // send and await a reply
     GatewayRequest *sendRequest(const QByteArray &payload);
     GatewayRequest *sendRequest(const QByteArray &payload, const RetryPolicy &policy);
 
@@ -136,18 +136,18 @@ signals:
     void statsUpdated(GatewayStats stats);
 
 private:
-    // переходы состояний
+    // state transitions
     void setChannelState(ChannelState s);
     void setSessionState(SessionState s);
-    void enterActiveState();   // общий путь "ack получен" / "peer открыл сессию"
+    void enterActiveState();   // common path for "ack received" / "peer opened a session"
 
-    // обработчики транспорта
+    // transport handlers
     void onTransportOpened();
     void onTransportClosed();
     void onTransportBytes(const QByteArray &bytes);
     void onTransportError(const QString &msg);
 
-    // распределение прав на коллабораторов
+    // propagate transport/codec to the collaborators
     void propagateCodec();
     void propagateTransport();
 
@@ -163,7 +163,7 @@ private:
 
     GatewayStats              m_stats{};
     QTimer                   *m_statsTimer = nullptr;
-    std::chrono::milliseconds m_statsInterval{0};   // 0 = периодический эмит выключен
+    std::chrono::milliseconds m_statsInterval{0};   // 0 = periodic emit disabled
 
     ReplyCacheConfig          m_replyCacheConfig{};
     QCache<quint32, QByteArray> m_replyCache{m_replyCacheConfig.maxEntries};

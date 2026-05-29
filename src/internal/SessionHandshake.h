@@ -11,10 +11,10 @@ class QTimer;
 namespace gcm::internal {
 
 // =====================================================================
-//  Handshake начала и завершения сессии: SessionStart / SessionStartAck /
-//  SessionStop, плюс таймер ожидания SessionStartAck. Состоянием сессии
-//  не управляет — это работа Gateway, который слушает timedOut() и
-//  принимает решение по результату.
+//  Session start/teardown handshake: SessionStart / SessionStartAck /
+//  SessionStop, plus the SessionStartAck wait timer. Does not manage
+//  session state — that is the Gateway's job, which listens to timedOut()
+//  and decides what to do with the result.
 // =====================================================================
 class SessionHandshake : public QObject
 {
@@ -26,27 +26,27 @@ public:
     void setCodec(IMessageCodec *codec)      { m_codec = codec; }
     void setTransport(ITransport *transport) { m_transport = transport; }
 
-    // Таймаут ожидания SessionStartAck. 0 — ждать бесконечно.
+    // SessionStartAck wait timeout. 0 — wait forever.
     void setTimeout(std::chrono::milliseconds timeout);
     [[nodiscard]] std::chrono::milliseconds timeout() const { return m_timeout; }
 
-    // Отправляет SessionStart и стартует ack-таймер. Возвращает количество
-    // отправленных байт (≥ 0) или -1, если кодек/транспорт не готовы.
+    // Sends SessionStart and starts the ack timer. Returns the number of
+    // bytes sent (≥ 0), or -1 if the codec/transport are not ready.
     qint64 initiate();
 
-    // Отправляет SessionStartAck. Используется при входящем SessionStart от узла.
+    // Sends SessionStartAck. Used on an incoming SessionStart from the peer.
     qint64 sendAck();
 
-    // Отправляет SessionStop. Останавливает ack-таймер на всякий случай.
+    // Sends SessionStop. Stops the ack timer just in case.
     qint64 terminate();
 
-    // Остановить ack-таймер вручную (когда сессия установлена иначе).
+    // Stop the ack timer manually (when the session is established otherwise).
     void cancelTimeout();
 
     [[nodiscard]] bool isAwaitingAck() const;
 
 signals:
-    void timedOut();        // SessionStartAck не пришёл в срок
+    void timedOut();        // SessionStartAck did not arrive in time
 
 private slots:
     void onTimeout();

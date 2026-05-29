@@ -11,9 +11,9 @@ class QTimer;
 namespace gcm::internal {
 
 // =====================================================================
-//  Heartbeat-таймер + счётчик пропусков. Принимает решение "линия молчит
-//  слишком долго" (missedExceeded) и "линия вернулась" (recovered), но
-//  не управляет состоянием сессии — это работа Gateway.
+//  Heartbeat timer + missed counter. Decides "the link has been silent
+//  too long" (missedExceeded) and "the link is back" (recovered), but
+//  does not manage session state — that is the Gateway's job.
 // =====================================================================
 class KeepAliveMonitor : public QObject
 {
@@ -25,29 +25,29 @@ public:
     void setCodec(IMessageCodec *codec)      { m_codec = codec; }
     void setTransport(ITransport *transport) { m_transport = transport; }
 
-    // Применить новую конфигурацию. Если heartbeat уже идёт и interval
-    // изменился — таймер переставляется на новое значение. enabled=false
-    // останавливает таймер; enabled=true сам по себе НЕ запускает —
-    // запуск делает Gateway::enterActiveState().
+    // Apply a new configuration. If the heartbeat is already running and the
+    // interval changed — the timer is rescheduled to the new value. enabled=false
+    // stops the timer; enabled=true by itself does NOT start it —
+    // starting is done by Gateway::enterActiveState().
     void setConfig(const KeepAliveConfig &c);
     [[nodiscard]] KeepAliveConfig config() const { return m_config; }
     [[nodiscard]] bool isEnabled() const { return m_config.enabled; }
     [[nodiscard]] bool isRunning() const;
 
-    // Запустить heartbeat: сбрасывает missed, стартует таймер с config.interval,
-    // и сразу же отправляет первый kalive (если codec/transport готовы).
+    // Start the heartbeat: resets missed, starts the timer with config.interval,
+    // and immediately sends the first kalive (if codec/transport are ready).
     void start();
     void stop();
 
-    // Известить о приходе keep-alive ответа от узла. Сбрасывает missed
-    // и сигналит recovered, если был период "пропуска".
+    // Notify of an incoming keep-alive reply from the peer. Resets missed
+    // and signals recovered if there was a "missed" period.
     void noteReply();
 
 signals:
-    void bytesPushed(qint64 bytes);     // отправлен heartbeat-кадр
-    void replyReceived();                // пришёл KeepAliveReply (для счётчиков)
-    void missedExceeded();               // missed > maxMissed (первый раз подряд)
-    void recovered();                    // первый ответ после missedExceeded
+    void bytesPushed(qint64 bytes);     // a heartbeat frame was sent
+    void replyReceived();                // a KeepAliveReply arrived (for counters)
+    void missedExceeded();               // missed > maxMissed (first time in a row)
+    void recovered();                    // first reply after missedExceeded
 
 private slots:
     void onTick();
@@ -58,7 +58,7 @@ private:
     KeepAliveConfig m_config{};
     QTimer         *m_timer     = nullptr;
     qint32          m_missed    = 0;
-    bool            m_exceeded  = false;   // зафиксирован ли missedExceeded
+    bool            m_exceeded  = false;   // whether missedExceeded was latched
 };
 
 } // namespace gcm::internal

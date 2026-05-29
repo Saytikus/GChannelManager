@@ -16,8 +16,9 @@ class QTimer;
 namespace gcm::internal {
 
 // =====================================================================
-//  Менеджер pending-запросов: корреляция, ретраи, таймауты, lifecycle
-//  GatewayRequest. Внутренний коллаборатор Gateway. Не часть публичного API.
+//  Manager of pending requests: correlation, retries, timeouts, and the
+//  GatewayRequest lifecycle. An internal Gateway collaborator. Not part
+//  of the public API.
 // =====================================================================
 class PendingRequests : public QObject
 {
@@ -31,31 +32,31 @@ public:
     void setDefaultPolicy(const RetryPolicy &p) { m_defaultPolicy = p; }
     [[nodiscard]] const RetryPolicy &defaultPolicy() const { return m_defaultPolicy; }
 
-    // Создаёт GatewayRequest и регистрирует его. Первая попытка планируется
-    // через QTimer::singleShot(0), чтобы вызывающий успел подключить сигналы.
+    // Creates a GatewayRequest and registers it. The first attempt is scheduled
+    // via QTimer::singleShot(0), so the caller has time to connect its signals.
     [[nodiscard]] GatewayRequest *enqueue(const QByteArray &payload, const RetryPolicy &policy);
     [[nodiscard]] GatewayRequest *enqueue(const QByteArray &payload) {
         return enqueue(payload, m_defaultPolicy);
     }
 
-    // Создаёт уже "проваленный" GatewayRequest — для случаев, когда
-    // предусловия sendRequest не выполнены. failed/finished эмитятся
-    // через singleShot(0), чтобы вызывающий мог подключиться.
+    // Creates an already-"failed" GatewayRequest — for cases where the
+    // sendRequest preconditions are not met. failed/finished are emitted
+    // via singleShot(0), so the caller can connect.
     [[nodiscard]] GatewayRequest *createPreflightFailed(GatewayRequest::Error err);
 
-    // Если найден pending с таким corrId — завершить успехом и вернуть true.
+    // If a pending request with this corrId is found — complete it with success and return true.
     bool tryCompleteSuccess(quint32 corrId, const QByteArray &response);
 
-    // Провалить все pending с указанной ошибкой (например, сессия завершена).
+    // Fail all pending requests with the given error (e.g. the session ended).
     void failAll(GatewayRequest::Error err);
 
     [[nodiscard]] bool isEmpty() const { return m_pending.isEmpty(); }
 
 signals:
-    void bytesPushed(qint64 bytes);            // данные отправлены в транспорт
-    void retryStarted();                       // началась повторная попытка
-    void requestSucceeded();                   // успешное завершение
-    void requestFailed();                      // финальный отказ (любая Error)
+    void bytesPushed(qint64 bytes);            // data sent to the transport
+    void retryStarted();                       // a retry attempt has begun
+    void requestSucceeded();                   // successful completion
+    void requestFailed();                      // final failure (any Error)
 
 private:
     struct Pending {

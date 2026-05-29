@@ -42,7 +42,7 @@ QByteArray SimpleFrameCodec::encodeReply(quint32 correlationId, const QByteArray
 
 QByteArray SimpleFrameCodec::encodeData(const QByteArray &payload)
 {
-    return makeFrame(Data, 0, payload);   // корреляция не нужна
+    return makeFrame(Data, 0, payload);   // no correlation needed
 }
 
 QByteArray SimpleFrameCodec::encodeSessionStart()
@@ -71,11 +71,11 @@ std::vector<SimpleFrameCodec::RawFrame> SimpleFrameCodec::parse(QByteArray &buf)
     qint32 pos = 0;
     while (buf.size() - pos >= kHeader) {
         const char *h = buf.constData() + pos;
-        if (quint8(h[0]) != kMagic) { ++pos; continue; }   // ресинхронизация по magic
+        if (quint8(h[0]) != kMagic) { ++pos; continue; }   // resync by magic
 
         const quint32 len = getU32(h + 6);
         if (buf.size() - pos < kHeader + qint32(len))
-            break;                                          // кадр пришёл не целиком
+            break;                                          // frame not fully arrived yet
 
         RawFrame f;
         f.type    = quint8(h[1]);
@@ -105,7 +105,7 @@ std::vector<DecodedMessage> SimpleFrameCodec::feed(const QByteArray &bytes)
         case SessionStart:    m.type = DecodedMessage::Type::SessionStart;    break;
         case SessionStartAck: m.type = DecodedMessage::Type::SessionStartAck; break;
         case SessionStop:     m.type = DecodedMessage::Type::SessionStop;     break;
-        default:              m.type = DecodedMessage::Type::Unknown;         break;   // KeepAliveReq и пр.
+        default:              m.type = DecodedMessage::Type::Unknown;         break;   // KeepAliveReq etc.
         }
         out.push_back(std::move(m));
     }
