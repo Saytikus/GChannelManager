@@ -20,3 +20,12 @@ target_link_libraries(tst_Gateway
         Qt${QT_VERSION_MAJOR}::Test
 )
 add_test(NAME Gateway COMMAND tst_Gateway)
+
+# ----- integration tests (two gateways over a linked in-memory transport) -----
+add_executable(tst_Integration tst_Integration.cpp)
+target_link_libraries(tst_Integration
+    PRIVATE
+        GChannelManager
+        Qt${QT_VERSION_MAJOR}::Test
+)
+add_test(NAME Integration COMMAND tst_Integration)
