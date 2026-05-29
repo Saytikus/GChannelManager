@@ -6,9 +6,9 @@
 #include <GChannelManager/ITransport.h>
 
 // =====================================================================
-//  In-memory транспорт для юнит-тестов.
-//  Запоминает всё, что отправляет Gateway, и даёт тесту "доставить"
-//  произвольные байты обратно (имитация ответа узла).
+//  In-memory transport for unit tests.
+//  Records everything the Gateway sends, and lets the test "deliver"
+//  arbitrary bytes back (simulating the peer's reply).
 // =====================================================================
 class FakeTransport : public ITransport
 {
@@ -19,11 +19,11 @@ public:
     State   state() const override { return m_state; }
     QString name()  const override { return QStringLiteral("fake"); }
 
-    // --- инспекция (для тестов) ---
+    // --- inspection (for tests) ---
     [[nodiscard]] const QList<QByteArray> &sent() const { return m_sent; }
     void clearSent() { m_sent.clear(); }
 
-    // --- хуки для тестов ---
+    // --- hooks for tests ---
     void simulateReceive(const QByteArray &bytes) {
         if (m_state == State::Open)
             emit bytesReceived(bytes);
@@ -53,7 +53,7 @@ public slots:
     }
 
 signals:
-    void dataSent(const QByteArray &data);   // тестовый сигнал
+    void dataSent(const QByteArray &data);   // test-only signal
 
 private:
     State              m_state = State::Closed;
