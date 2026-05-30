@@ -269,6 +269,8 @@ signals:
 ```
 
 - `setReplyCacheConfig(...)` / `setReplyCacheEnabled(bool)` work **on the fly**. Disabling the cache clears the accumulated entries.
+- The cache is also cleared on every **session boundary** — `startSession`/`stopSession`, an incoming `SessionStart`/`SessionStop`, and a transport close. A reconnecting peer that restarts its `corrId`s therefore cannot be answered with a reply cached for a different request from a previous session.
+- Within a single session, a `corrId` must uniquely identify one request payload (there is no TTL — eviction is LRU-by-count). `maxEntries` must be `>= 1` (it is clamped otherwise).
 - Resends from the cache are counted by `stats.cachedRepliesResent` (see [Statistics](07-Statistics.md)).
 
 > [!NOTE]

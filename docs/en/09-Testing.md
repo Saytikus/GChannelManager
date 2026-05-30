@@ -86,7 +86,7 @@ The main testing tool. It does no I/O but honestly honors the `ITransport` contr
 - `feed_oversizedLength_resyncsWithoutOverrun` — a header claiming a huge `len` is rejected (no OOB read / unbounded buffering), the parser resyncs.
 - `feed_corruptedFrame_droppedByCrc` — a flipped payload bit fails the trailing CRC; the frame is dropped, not delivered as valid data.
 
-### `tst_Gateway` (26)
+### `tst_Gateway` (28)
 
 | Group | Cases |
 |---|---|
@@ -94,8 +94,9 @@ The main testing tool. It does no I/O but honestly honors the `ITransport` contr
 | Keep-alive at runtime | `setKeepAliveEnabled_runtimeOff_clearsSuspendedToActive`, `setKeepAliveEnabled_runtimeOn_startsHeartbeat` |
 | Request awaiting a reply | `sendRequest_succeedsOnPeerReply`, `sendRequest_retriesOnTimeout_thenSucceeds`, `sendRequest_synchronousReplyFromSend_completesSafely`, `sendRequest_failsBeforeChannelEnabled`, `cancel_failsPendingRequest` |
 | Fire-and-forget | `send_fireAndForget_emitsDataFrame`, `send_failsWhenSessionInactive` |
-| Server role and reply cache | `incomingRequest_emitsRequestReceived`, `reply_sendsReplyFrameViaTransport`, `replyCache_disabled_emitsSignalOnEveryRequest`, `replyCache_enabled_resendsCachedReplyWithoutEmittingSignal`, `replyCache_disableClearsExistingEntries` |
+| Server role and reply cache | `incomingRequest_emitsRequestReceived`, `reply_sendsReplyFrameViaTransport`, `replyCache_disabled_emitsSignalOnEveryRequest`, `replyCache_enabled_resendsCachedReplyWithoutEmittingSignal`, `replyCache_disableClearsExistingEntries`, `replyCache_clearedOnSessionRestart_freshRequestNotStale` |
 | Statistics | `stats_countersTrackKeepAliveAndRequest`, `stats_droppedReplyCounted`, `stats_periodicSignalFires_andStopsOnZeroInterval`, `stats_resetClearsCounters` |
+| Configuration | `config_clampsInvalidValues` |
 
 ## Patterns for your own tests
 

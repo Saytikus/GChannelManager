@@ -69,7 +69,7 @@ flowchart LR
     Bytes["bytesReceived(b)"] --> Feed["codec.feed(b)"]
     Feed --> Loop{"for each msg"}
     Loop -->|Reply, corrId in pending| Succeed["completeSuccess"]
-    Loop -->|Reply, no pending| Dropped["droppedReplies++<br/>emit dataReceived"]
+    Loop -->|Reply, no pending| Dropped["droppedReplies++<br/>(dropped, not surfaced)"]
     Loop -->|Request| Req["emit requestReceived<br/>or reply cache"]
     Loop -->|SessionStart| SS["send SessionStartAck<br/>→ Active"]
     Loop -->|SessionStartAck| Ack["Establishing → Active"]
