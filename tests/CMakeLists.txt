@@ -9,6 +9,15 @@ target_link_libraries(tst_SimpleFrameCodec
 )
 add_test(NAME SimpleFrameCodec COMMAND tst_SimpleFrameCodec)
 
+# ----- codec property tests (seeded, deterministic) -----
+add_executable(tst_CodecProperties tst_CodecProperties.cpp)
+target_link_libraries(tst_CodecProperties
+    PRIVATE
+        GChannelManager
+        Qt${QT_VERSION_MAJOR}::Test
+)
+add_test(NAME CodecProperties COMMAND tst_CodecProperties)
+
 # ----- gateway tests -----
 add_executable(tst_Gateway
     tst_Gateway.cpp

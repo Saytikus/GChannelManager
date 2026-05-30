@@ -10,6 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(GCHANNELMANAGER_BUILD_EXAMPLES "Build the GChannelManager demo executable" OFF)
 option(GCHANNELMANAGER_BUILD_TESTS    "Build the GChannelManager unit tests"      OFF)
+option(GCHANNELMANAGER_BUILD_FUZZERS  "Build libFuzzer targets (Clang only)"      OFF)
 
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core)
@@ -116,4 +117,8 @@ endif()
 if(GCHANNELMANAGER_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+if(GCHANNELMANAGER_BUILD_FUZZERS)
+    add_subdirectory(fuzz)
 endif()
