@@ -21,14 +21,13 @@
 //    * request/reply round-trips in BOTH directions (the gateway is a
 //      symmetric peer — either side can be the requester),
 //    * fire-and-forget push from one side to the other,
-//    * retry recovery when the link drops frames.
+//    * retry recovery when the link drops frames,
+//    * mutual keep-alive: each gateway auto-answers the peer's KeepAliveReq,
+//      so two bare gateways keep each other alive.
 //
-//  Note on keep-alive: a stock Gateway sends KeepAliveReq but does NOT
-//  auto-answer an incoming one (the codec decodes KeepAliveReq as
-//  Unknown). In a real deployment the remote node answers with a
-//  KeepAliveReply; two bare gateways over a plain pipe would not, so they
-//  would eventually trip to Suspended. These tests therefore disable
-//  keep-alive and focus on the session + messaging paths.
+//  Most tests disable keep-alive to keep timing deterministic and focus on the
+//  session + messaging paths; keepAlive_bothEndsStayActive covers the heartbeat
+//  round-trip explicitly.
 // =====================================================================
 
 namespace {
@@ -150,6 +149,7 @@ private slots:
     void serverInitiatedRequest_clientReplies();
     void fireAndForget_pushDeliveredToPeer();
     void retry_recoversFromLostRequestFrames();
+    void keepAlive_bothEndsStayActive();
 };
 
 // Fresh pair of gateways + a cross-connected link before each test.
@@ -274,6 +274,30 @@ void TestIntegration::retry_recoversFromLostRequestFrames()
     QCOMPARE(ok.first().at(0).toByteArray(), QByteArray("OK:IMPORTANT"));
     QVERIFY(retry.count() >= 2);          // at least the two dropped attempts were retried
     QVERIFY(req->attempts() >= 3);        // 2 lost + 1 that got through
+}
+
+// Mutual keep-alive: with the responder half implemented, each gateway answers
+// the peer's KeepAliveReq with a KeepAliveReply. Over several heartbeat
+// intervals neither side trips to Suspended, and both record received pongs.
+void TestIntegration::keepAlive_bothEndsStayActive()
+{
+    Gateway::KeepAliveConfig ka;
+    ka.enabled   = true;
+    ka.interval  = std::chrono::milliseconds(30);
+    ka.maxMissed = 3;
+    m_client->setKeepAliveConfig(ka);
+    m_server->setKeepAliveConfig(ka);
+
+    establishSession();
+
+    // Wait well past maxMissed * interval (~90 ms) so an unanswered heartbeat
+    // would have forced Suspended by now.
+    QTest::qWait(300);
+
+    QCOMPARE(m_client->sessionState(), Gateway::SessionState::Active);
+    QCOMPARE(m_server->sessionState(), Gateway::SessionState::Active);
+    QVERIFY(m_client->stats().keepAlivesReceived > 0);
+    QVERIFY(m_server->stats().keepAlivesReceived > 0);
 }
 
 QTEST_MAIN(TestIntegration)

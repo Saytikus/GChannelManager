@@ -60,6 +60,42 @@ quint32 lastRequestCorrId(const FakeTransport *t)
     return 0;
 }
 
+// A transport that answers a Request *synchronously from inside send()* — the
+// worst case for re-entrancy. It lets us exercise the path where a reply
+// completes (and erases) a Pending request while PendingRequests::startAttempt
+// is still mid-send (L4). deliver() injects arbitrary inbound bytes.
+class SyncReplyTransport : public ITransport
+{
+    Q_OBJECT
+public:
+    using ITransport::ITransport;
+
+    State   state() const override { return m_state; }
+    QString name()  const override { return QStringLiteral("sync"); }
+
+    void deliver(const QByteArray &bytes) { if (m_state == State::Open) emit bytesReceived(bytes); }
+
+public slots:
+    void open()  override { m_state = State::Open;   emit stateChanged(m_state); emit opened(); }
+    void close() override { m_state = State::Closed; emit stateChanged(m_state); emit closed(); }
+    qint64 send(const QByteArray &data) override
+    {
+        if (m_state != State::Open)
+            return -1;
+        // Re-enter the gateway: reply to any Request right now, before returning.
+        QByteArray buf = data;
+        for (const auto &f : SimpleFrameCodec::parse(buf)) {
+            if (f.type == SimpleFrameCodec::Request)
+                emit bytesReceived(SimpleFrameCodec::makeFrame(
+                    SimpleFrameCodec::Reply, f.corrId, QByteArray("SYNC:") + f.payload));
+        }
+        return data.size();
+    }
+
+private:
+    State m_state = State::Closed;
+};
+
 } // namespace
 
 class TestGateway : public QObject
@@ -73,6 +109,7 @@ private slots:
     void setKeepAliveEnabled_runtimeOn_startsHeartbeat();
     void sendRequest_succeedsOnPeerReply();
     void sendRequest_retriesOnTimeout_thenSucceeds();
+    void sendRequest_synchronousReplyFromSend_completesSafely();
     void sendRequest_failsBeforeChannelEnabled();
     void send_fireAndForget_emitsDataFrame();
     void send_failsWhenSessionInactive();
@@ -256,6 +293,38 @@ void TestGateway::sendRequest_retriesOnTimeout_thenSucceeds()
 
     QTRY_COMPARE(okSpy.count(), 1);
     QVERIFY(req->attempts() >= 2);   // at least one retry attempt
+}
+
+// A reply delivered synchronously from inside transport->send() must complete
+// the request cleanly — no use-after-free in startAttempt (L4 regression).
+void TestGateway::sendRequest_synchronousReplyFromSend_completesSafely()
+{
+    Gateway gw;
+    gw.setCodec(std::make_unique<SimpleFrameCodec>());
+    auto transport = std::make_unique<SyncReplyTransport>();
+    auto *t = transport.get();
+    gw.setTransport(std::move(transport));
+
+    Gateway::KeepAliveConfig ka;
+    ka.enabled = false;   // no heartbeat sends re-entering during this test
+    gw.setKeepAliveConfig(ka);
+
+    gw.enableChannel();
+    // Bring the session Active via an incoming SessionStart (the ack we send is
+    // not a Request, so it does not re-enter). Avoids the handshake round-trip.
+    t->deliver(SimpleFrameCodec::makeFrame(SimpleFrameCodec::SessionStart, 0, {}));
+    QCOMPARE(gw.sessionState(), Gateway::SessionState::Active);
+
+    auto *req = gw.sendRequest(QByteArray("ping"));
+    QSignalSpy okSpy(req, &GatewayRequest::succeeded);
+
+    // startAttempt fires on the next loop turn; the sync transport replies from
+    // inside send(), so the request resolves without dangling its Pending entry.
+    // (Read the result from the spy, not from req: it is deleteLater'd on
+    // completion and is gone once QTRY has spun the event loop.)
+    QTRY_COMPARE(okSpy.count(), 1);
+    QCOMPARE(okSpy.first().at(0).toByteArray(), QByteArray("SYNC:ping"));
+    QCOMPARE(gw.stats().requestsSucceeded, quint64(1));
 }
 
 // A request issued before the channel is enabled fails preflight with ChannelDisabled.

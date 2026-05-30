@@ -17,7 +17,7 @@ private slots:
     void incomingRequestFrame_classifiedAsTypeRequest();
     void encodeReply_carriesCorrelation();
     void encodeData_carriesNoCorrelation();
-    void encodeKeepAlive_classifiedAsKeepAliveReplyOnly();
+    void keepAlive_reqDecodesAsPing_replyDecodesAsKeepAlive();
     void encodeSessionStart_classifiedAsType_SessionStart();
     void encodeSessionStartAck_classifiedAsType_SessionStartAck();
     void encodeSessionStop_classifiedAsType_SessionStop();
@@ -26,6 +26,8 @@ private slots:
     void feed_multipleFrames_inOneBuffer();
     void parse_consumesBytesIncrementally();
     void reset_clearsBuffer();
+    void feed_oversizedLength_resyncsWithoutOverrun();
+    void feed_corruptedFrame_droppedByCrc();
 };
 
 // encodeRequest() yields a well-formed Request frame, and the matching
@@ -101,20 +103,20 @@ void TestSimpleFrameCodec::encodeData_carriesNoCorrelation()
     QCOMPARE(msgs[0].payload, payload);
 }
 
-// Our own KeepAliveReq decodes as Unknown; only the peer's KeepAliveReply
-// becomes Type::KeepAlive (which is what drives liveness detection).
-void TestSimpleFrameCodec::encodeKeepAlive_classifiedAsKeepAliveReplyOnly()
+// An incoming KeepAliveReq decodes as KeepAlivePing (so the Gateway can answer
+// it); the peer's KeepAliveReply decodes as KeepAlive (drives liveness).
+void TestSimpleFrameCodec::keepAlive_reqDecodesAsPing_replyDecodesAsKeepAlive()
 {
     SimpleFrameCodec codec;
-    // encodeKeepAlive() is a heartbeat request (KeepAliveReq); feed() marks it Unknown
-    // (because the peer should not react to its own request).
+    // encodeKeepAlive() is the heartbeat request (KeepAliveReq). Received from a
+    // peer it must surface as KeepAlivePing so the Gateway replies with a pong.
     const QByteArray req = codec.encodeKeepAlive();
     auto msgs = codec.feed(req);
     QCOMPARE(msgs.size(), size_t(1));
-    QCOMPARE(msgs[0].type, DecodedMessage::Type::Unknown);
+    QCOMPARE(msgs[0].type, DecodedMessage::Type::KeepAlivePing);
 
-    // A KeepAliveReply from the peer, on the other hand, must become DecodedMessage::Type::KeepAlive.
-    const QByteArray rep = SimpleFrameCodec::makeFrame(SimpleFrameCodec::KeepAliveReply, 0, {});
+    // A KeepAliveReply (the pong) must become DecodedMessage::Type::KeepAlive.
+    const QByteArray rep = codec.encodeKeepAliveReply();
     msgs = codec.feed(rep);
     QCOMPARE(msgs.size(), size_t(1));
     QCOMPARE(msgs[0].type, DecodedMessage::Type::KeepAlive);
@@ -234,6 +236,60 @@ void TestSimpleFrameCodec::reset_clearsBuffer()
     auto msgs = codec.feed(frame);
     QCOMPARE(msgs.size(), size_t(1));
     QCOMPARE(msgs[0].correlationId, quint32(2));
+}
+
+// A header that claims an absurd payload length (high bit set, or merely huge)
+// must not be trusted: the parser treats the magic as line noise and resyncs,
+// rather than reading out of bounds or buffering forever (H1).
+void TestSimpleFrameCodec::feed_oversizedLength_resyncsWithoutOverrun()
+{
+    SimpleFrameCodec codec;
+
+    // Hand-build a bogus header: magic, type, corrId=0, len=0xFFFFFFFF (negative
+    // if ever cast to signed). No payload follows.
+    QByteArray bogus;
+    bogus.append(char(0xA5));                       // magic
+    bogus.append(char(SimpleFrameCodec::Reply));    // type
+    bogus.append(4, char(0));                       // corrId = 0
+    bogus.append(4, char(0xFF));                    // len = 0xFFFFFFFF
+
+    // Must not crash / read OOB, and yields nothing.
+    auto msgs = codec.feed(bogus);
+    QCOMPARE(msgs.size(), size_t(0));
+
+    // The parser resynchronized past the bad magic, so a valid frame still
+    // decodes afterwards instead of being swallowed.
+    const QByteArray good = SimpleFrameCodec::makeFrame(SimpleFrameCodec::Reply, 5,
+                                                        QByteArray("ok"));
+    auto msgs2 = codec.feed(good);
+    QCOMPARE(msgs2.size(), size_t(1));
+    QCOMPARE(msgs2[0].correlationId, quint32(5));
+    QCOMPARE(msgs2[0].payload, QByteArray("ok"));
+}
+
+// A single flipped payload bit fails the trailing CRC: the frame is dropped
+// (never delivered as valid data) and the parser recovers (M2).
+void TestSimpleFrameCodec::feed_corruptedFrame_droppedByCrc()
+{
+    SimpleFrameCodec codec;
+    QByteArray frame = SimpleFrameCodec::makeFrame(SimpleFrameCodec::Reply, 3,
+                                                   QByteArray("hello"));
+    // flip a bit in the first payload byte (offset = 10-byte header) -> CRC fails
+    frame[10] = char(frame[10] ^ 0x01);
+
+    auto msgs = codec.feed(frame);
+    // the corrupted "hello" must never be surfaced as a valid message
+    for (const auto &m : msgs)
+        QVERIFY(m.payload != QByteArray("hello"));
+
+    // and a clean frame still parses after a reset (resync from a fresh buffer)
+    codec.reset();
+    const QByteArray good = SimpleFrameCodec::makeFrame(SimpleFrameCodec::Reply, 4,
+                                                        QByteArray("ok"));
+    auto msgs2 = codec.feed(good);
+    QCOMPARE(msgs2.size(), size_t(1));
+    QCOMPARE(msgs2[0].correlationId, quint32(4));
+    QCOMPARE(msgs2[0].payload, QByteArray("ok"));
 }
 
 QTEST_APPLESS_MAIN(TestSimpleFrameCodec)

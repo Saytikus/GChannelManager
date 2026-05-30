@@ -15,7 +15,8 @@ struct DecodedMessage {
         SessionStart,     // peer initiates a session (we must answer with SessionStartAck)
         SessionStartAck,  // peer acknowledged our SessionStart (we move to Active)
         SessionStop,      // peer ends the session
-        KeepAlive,        // keep-alive (link liveness confirmation)
+        KeepAlivePing,    // keep-alive request from the peer -> Gateway auto-answers
+        KeepAlive,        // keep-alive reply (link liveness confirmation)
         Data,             // data without correlation (push from the peer)
         Unknown           // unrecognized / service
     };

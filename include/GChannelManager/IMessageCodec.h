@@ -39,8 +39,13 @@ public:
     [[nodiscard]] virtual QByteArray encodeSessionStartAck() = 0;
     [[nodiscard]] virtual QByteArray encodeSessionStop()     = 0;
 
-    // Build a keep-alive frame.
+    // Build a keep-alive request frame (the heartbeat we initiate).
     [[nodiscard]] virtual QByteArray encodeKeepAlive() = 0;
+
+    // Build a keep-alive reply frame — the answer to a peer's keep-alive
+    // request. The Gateway sends it automatically on a KeepAlivePing so two
+    // instances of this library can keep each other alive.
+    [[nodiscard]] virtual QByteArray encodeKeepAliveReply() = 0;
 
     // Feed raw bytes, get back a list of decoded messages.
     [[nodiscard]] virtual std::vector<DecodedMessage> feed(const QByteArray &bytes) = 0;

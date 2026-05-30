@@ -2,6 +2,8 @@
 
 #include <QTimer>
 
+#include "TimerMs.h"
+
 namespace gcm::internal {
 
 KeepAliveMonitor::KeepAliveMonitor(QObject *parent)
@@ -33,7 +35,7 @@ void KeepAliveMonitor::setConfig(const KeepAliveConfig &c)
     }
 
     if (wasEnabled && c.enabled && oldInterval != c.interval && m_timer->isActive()) {
-        m_timer->setInterval(qint32(c.interval.count()));
+        m_timer->setInterval(timerMs(c.interval));
     }
 }
 
@@ -43,7 +45,7 @@ void KeepAliveMonitor::start()
         return;
     m_missed   = 0;
     m_exceeded = false;
-    m_timer->start(qint32(m_config.interval.count()));
+    m_timer->start(timerMs(m_config.interval));
     onTick();   // first heartbeat — immediately
 }
 
@@ -81,6 +83,13 @@ void KeepAliveMonitor::noteReply()
         m_exceeded = false;
         emit recovered();
     }
+}
+
+qint64 KeepAliveMonitor::answerPing()
+{
+    if (!m_codec || !m_transport || !m_transport->isOpen())
+        return -1;
+    return m_transport->send(m_codec->encodeKeepAliveReply());
 }
 
 } // namespace gcm::internal

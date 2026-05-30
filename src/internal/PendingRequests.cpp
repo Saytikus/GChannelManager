@@ -3,6 +3,8 @@
 #include <QTimer>
 #include <cmath>
 
+#include "TimerMs.h"
+
 namespace gcm::internal {
 
 PendingRequests::PendingRequests(QObject *parent)
@@ -96,20 +98,33 @@ void PendingRequests::startAttempt(quint32 id)
     auto found = find(id);
     if (!found)
         return;
-    Pending &p = found->get();
 
     if (!m_transport || !m_transport->isOpen()) {
         complete(id, /*ok=*/false, {}, GatewayRequest::Error::TransportError);
         return;
     }
 
-    ++p.req->m_attempts;
-    const qint64 bytes = m_transport->send(p.frame);
+    // Snapshot everything we need before send(): a synchronous (loopback)
+    // transport can deliver a reply re-entrantly from inside send(), which
+    // runs complete() and erases this Pending. Holding a reference across the
+    // call would then dangle. Copy out, send, then re-find for the timer.
+    Pending &p = found->get();
+    GatewayRequest *req      = p.req;
+    const QByteArray frame   = p.frame;
+    const RetryPolicy policy = p.policy;
+
+    ++req->m_attempts;
+    const auto ms = attemptTimeout(policy, req->m_attempts - 1);
+
+    const qint64 bytes = m_transport->send(frame);
     if (bytes >= 0)
         emit bytesPushed(bytes);
 
-    const auto ms = attemptTimeout(p.policy, p.req->m_attempts - 1);
-    p.timer->start(qint32(ms.count()));
+    // send() may have completed (and erased) the request re-entrantly.
+    auto still = find(id);
+    if (!still)
+        return;
+    still->get().timer->start(timerMs(ms));
 }
 
 void PendingRequests::onAttemptTimeout(quint32 id)

@@ -43,6 +43,11 @@ public:
     // and signals recovered if there was a "missed" period.
     void noteReply();
 
+    // Answer an incoming keep-alive request from the peer with a reply frame.
+    // Independent of the heartbeat timer / missed counter. Returns the number
+    // of bytes sent (>= 0), or -1 if the codec/transport are not ready.
+    qint64 answerPing();
+
 signals:
     void bytesPushed(qint64 bytes);     // a heartbeat frame was sent
     void replyReceived();                // a KeepAliveReply arrived (for counters)

@@ -2,6 +2,8 @@
 
 #include <QTimer>
 
+#include "TimerMs.h"
+
 namespace gcm::internal {
 
 SessionHandshake::SessionHandshake(QObject *parent)
@@ -20,7 +22,7 @@ void SessionHandshake::setTimeout(std::chrono::milliseconds timeout)
     if (m_timer->isActive()) {
         m_timer->stop();
         if (timeout.count() > 0)
-            m_timer->start(qint32(timeout.count()));
+            m_timer->start(timerMs(timeout));
     }
 }
 
@@ -35,7 +37,7 @@ qint64 SessionHandshake::initiate()
         return -1;
     const qint64 bytes = sendFrame(m_codec->encodeSessionStart());
     if (bytes >= 0 && m_timeout.count() > 0)
-        m_timer->start(qint32(m_timeout.count()));
+        m_timer->start(timerMs(m_timeout));
     return bytes;
 }
 

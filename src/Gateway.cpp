@@ -5,6 +5,7 @@
 #include "internal/KeepAliveMonitor.h"
 #include "internal/PendingRequests.h"
 #include "internal/SessionHandshake.h"
+#include "internal/TimerMs.h"
 
 using gcm::internal::KeepAliveMonitor;
 using gcm::internal::PendingRequests;
@@ -21,6 +22,10 @@ Gateway::Gateway(QObject *parent)
     , m_keepAlive(std::make_unique<KeepAliveMonitor>())
     , m_handshake(std::make_unique<SessionHandshake>())
 {
+    // statsUpdated(GatewayStats) may be delivered through a queued (cross-thread)
+    // connection, which needs the type registered at runtime.
+    qRegisterMetaType<GatewayStats>("GatewayStats");
+
     // Statistics driven by the collaborators' signals.
     connect(m_requests.get(), &PendingRequests::bytesPushed,
             this, [this](qint64 b) { m_stats.sentBytes += quint64(b); });
@@ -272,9 +277,10 @@ void Gateway::onTransportBytes(const QByteArray &bytes)
             m_stats.incomingRequests += 1;
             if (m_replyCacheConfig.enabled && m_transport && m_transport->isOpen()) {
                 if (const QByteArray *cached = m_replyCache.object(msg.correlationId)) {
-                    m_transport->send(*cached);
-                    m_stats.sentBytes          += quint64(cached->size());
-                    m_stats.cachedRepliesResent += 1;
+                    if (m_transport->send(*cached) >= 0) {
+                        m_stats.sentBytes           += quint64(cached->size());
+                        m_stats.cachedRepliesResent += 1;
+                    }
                     break;
                 }
             }
@@ -306,6 +312,13 @@ void Gateway::onTransportBytes(const QByteArray &bytes)
                 setSessionState(SessionState::Idle);
             }
             emit sessionStopReceived();
+            break;
+        case DecodedMessage::Type::KeepAlivePing:
+            {
+                const qint64 b = m_keepAlive->answerPing();
+                if (b >= 0)
+                    m_stats.sentBytes += quint64(b);
+            }
             break;
         case DecodedMessage::Type::KeepAlive:
             m_keepAlive->noteReply();
@@ -419,6 +432,10 @@ GatewayRequest *Gateway::sendRequest(const QByteArray &payload)
 
 GatewayRequest *Gateway::sendRequest(const QByteArray &payload, const RetryPolicy &policy)
 {
+    // Count every call so requestsSucceeded + requestsFailed reconciles with
+    // requestsSent: a preflight failure still produces a failed GatewayRequest.
+    m_stats.requestsSent += 1;
+
     if (!m_codec)
         return m_requests->createPreflightFailed(GatewayRequest::Error::TransportError);
     if (!isChannelEnabled())
@@ -426,7 +443,6 @@ GatewayRequest *Gateway::sendRequest(const QByteArray &payload, const RetryPolic
     if (m_session == SessionState::Idle || m_session == SessionState::Stopping)
         return m_requests->createPreflightFailed(GatewayRequest::Error::SessionInactive);
 
-    m_stats.requestsSent += 1;
     return m_requests->enqueue(payload, policy);
 }
 
@@ -437,7 +453,7 @@ void Gateway::setStatsInterval(std::chrono::milliseconds interval)
 {
     m_statsInterval = interval;
     if (interval.count() > 0)
-        m_statsTimer->start(qint32(interval.count()));
+        m_statsTimer->start(gcm::internal::timerMs(interval));
     else
         m_statsTimer->stop();
 }

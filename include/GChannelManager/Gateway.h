@@ -34,6 +34,12 @@ class SessionHandshake;
 //    * coordinating handling of incoming DecodedMessage::Type,
 //    * fire-and-forget send and reply to incoming requests (+ idempotency cache),
 //    * collecting and publishing statistics (GatewayStats).
+//
+//  Threading: the Gateway is single-threaded. It calls ITransport::send()
+//  directly and drives QTimers, so the transport must live in the Gateway's
+//  thread (the thread that owns this object and runs its event loop). To use a
+//  transport on a worker thread, move the whole Gateway there, or front it with
+//  a thread-safe transport that marshals send()/bytesReceived() across threads.
 // =====================================================================
 class GCHANNELMANAGER_EXPORT Gateway : public QObject
 {

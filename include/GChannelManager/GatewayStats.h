@@ -10,7 +10,7 @@
 struct GatewayStats {
     quint64 sentBytes          = 0;   // total bytes handed to transport->send()
     quint64 recvBytes          = 0;   // total bytes arrived via bytesReceived
-    quint64 requestsSent       = 0;   // sendRequest calls that passed preconditions
+    quint64 requestsSent       = 0;   // all sendRequest calls (incl. preflight failures)
     quint64 requestsSucceeded  = 0;
     quint64 requestsFailed     = 0;
     quint64 retries            = 0;   // retry attempts in total
