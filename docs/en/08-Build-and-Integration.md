@@ -17,12 +17,16 @@
 ```cmake
 option(GCHANNELMANAGER_BUILD_EXAMPLES "Build the GChannelManager demo executable" OFF)
 option(GCHANNELMANAGER_BUILD_TESTS    "Build the GChannelManager unit tests"      OFF)
+option(GCHANNELMANAGER_BUILD_FUZZERS  "Build libFuzzer targets (Clang only)"      OFF)
 ```
 
 | Option | Default | Effect |
 |---|---|---|
 | `GCHANNELMANAGER_BUILD_EXAMPLES` | `OFF` | Builds `examples/GChannelManagerDemo` — a loopback demo with losses and retries |
-| `GCHANNELMANAGER_BUILD_TESTS` | `OFF` | Builds `tests/tst_SimpleFrameCodec` and `tests/tst_Gateway`, registers them with `ctest` |
+| `GCHANNELMANAGER_BUILD_TESTS` | `OFF` | Builds the Qt Test suites (`tst_SimpleFrameCodec`, `tst_CodecProperties`, `tst_Gateway`, `tst_Integration`), registers them with `ctest` |
+| `GCHANNELMANAGER_BUILD_FUZZERS` | `OFF` | Builds the libFuzzer target for the codec (**Clang only**) — see [`fuzz/README.md`](../../fuzz/README.md) |
+
+All extras default to `OFF`, so the normal build stays Qt-Core-only and dependency-free.
 
 ## Building from the command line
 

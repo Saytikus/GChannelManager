@@ -86,6 +86,18 @@ The main testing tool. It does no I/O but honestly honors the `ITransport` contr
 - `feed_oversizedLength_resyncsWithoutOverrun` — a header claiming a huge `len` is rejected (no OOB read / unbounded buffering), the parser resyncs.
 - `feed_corruptedFrame_droppedByCrc` — a flipped payload bit fails the trailing CRC; the frame is dropped, not delivered as valid data.
 
+### `tst_CodecProperties` (4)
+
+Property-based tests over many fixed-seed random inputs (deterministic — the seed is printed, so any failure reproduces). No new dependency: seeded `QRandomGenerator` + Qt Test.
+
+- `roundTrip_anyFrameDecodesToItsFields` — `feed(makeFrame(type, corrId, payload))` decodes back to the same fields.
+- `chunkBoundary_sameDecodeRegardlessOfSplit` — the same bytes split at arbitrary boundaries decode to the same sequence as a single `feed()`.
+- `resync_recoversFramesSeparatedByGarbage` — valid frames separated by non-`0xA5` garbage are all recovered, in order.
+- `singleBitFlip_isNeverDeliveredAsOriginal` — flipping any one bit of a valid frame means it is never delivered as the original (CRC + length bounding).
+
+> [!NOTE] Fuzzing
+> The codec's byte-stream entry point also has a libFuzzer target — build with `-DGCHANNELMANAGER_BUILD_FUZZERS=ON` (Clang) and see [`fuzz/README.md`](../../fuzz/README.md). It runs `SimpleFrameCodec::feed()` under ASan/UBSan as a permanent guard for the bounded-length / CRC / resync hardening.
+
 ### `tst_Gateway` (28)
 
 | Group | Cases |
