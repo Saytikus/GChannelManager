@@ -1,6 +1,5 @@
 #pragma once
 
-#include <QHostAddress>
 #include <QString>
 #include <chrono>
 
@@ -30,11 +29,14 @@ struct SerialConfig {
 };
 
 struct UdpConfig {
-    QHostAddress localAddress  = QHostAddress::AnyIPv4;
-    quint16      localPort     = 0;       // 0 — any free port
-    QHostAddress remoteAddress;           // destination peer address
-    quint16      remotePort    = 0;
-    bool         bindBeforeSend = true;   // bind the socket on open()
+    // Addresses as plain strings ("0.0.0.0", "192.168.1.10", "::1") so the
+    // core library carries no QtNetwork dependency. A concrete UDP transport
+    // parses them into QHostAddress on its own side.
+    QString localAddress   = QStringLiteral("0.0.0.0");
+    quint16 localPort      = 0;            // 0 — any free port
+    QString remoteAddress;                 // destination peer address
+    quint16 remotePort     = 0;
+    bool    bindBeforeSend = true;         // bind the socket on open()
 };
 
 } // namespace transport
