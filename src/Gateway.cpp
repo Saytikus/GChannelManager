@@ -195,6 +195,7 @@ void Gateway::onTransportClosed()
     m_handshake->cancelTimeout();
     m_keepAlive->stop();
     m_requests->failAll(GatewayRequest::Error::ChannelDisabled);
+    m_replyCache.clear();   // session boundary: the next session may reuse corrIds
     setSessionState(SessionState::Idle);
     setChannelState(ChannelState::Disabled);
 }
@@ -244,6 +245,7 @@ void Gateway::stopSession()
         m_stats.sessionStopsSent += 1;
     }
     m_requests->failAll(GatewayRequest::Error::SessionInactive);
+    m_replyCache.clear();   // session boundary: the next session may reuse corrIds
     setSessionState(SessionState::Idle);
 }
 
@@ -268,10 +270,11 @@ void Gateway::onTransportBytes(const QByteArray &bytes)
     for (const auto &msg : m_codec->feed(bytes)) {
         switch (msg.type) {
         case DecodedMessage::Type::Reply:
-            if (!m_requests->tryCompleteSuccess(msg.correlationId, msg.payload)) {
+            // An unmatched reply (no pending request) is dropped, not surfaced:
+            // on a lossy link a retried request is often answered more than once,
+            // and those duplicates must not masquerade as uncorrelated Data.
+            if (!m_requests->tryCompleteSuccess(msg.correlationId, msg.payload))
                 m_stats.droppedReplies += 1;
-                emit dataReceived(msg.payload);
-            }
             break;
         case DecodedMessage::Type::Request:
             m_stats.incomingRequests += 1;
@@ -288,6 +291,7 @@ void Gateway::onTransportBytes(const QByteArray &bytes)
             break;
         case DecodedMessage::Type::SessionStart:
             m_stats.sessionStartsReceived += 1;
+            m_replyCache.clear();   // a (re)starting peer resets its corrIds
             {
                 const qint64 b = m_handshake->sendAck();
                 if (b >= 0)
@@ -311,6 +315,7 @@ void Gateway::onTransportBytes(const QByteArray &bytes)
                 m_requests->failAll(GatewayRequest::Error::SessionInactive);
                 setSessionState(SessionState::Idle);
             }
+            m_replyCache.clear();   // session ended: drop cached replies for its corrIds
             emit sessionStopReceived();
             break;
         case DecodedMessage::Type::KeepAlivePing:
@@ -369,9 +374,11 @@ void Gateway::setReplyCacheConfig(const ReplyCacheConfig &c)
     const bool wasEnabled = m_replyCacheConfig.enabled;
     const auto oldMax     = m_replyCacheConfig.maxEntries;
     m_replyCacheConfig    = c;
+    if (m_replyCacheConfig.maxEntries < 1)
+        m_replyCacheConfig.maxEntries = 1;   // QCache maxCost <= 0 would silently store nothing
 
-    if (oldMax != c.maxEntries)
-        m_replyCache.setMaxCost(c.maxEntries);
+    if (oldMax != m_replyCacheConfig.maxEntries)
+        m_replyCache.setMaxCost(m_replyCacheConfig.maxEntries);
     if (wasEnabled && !c.enabled)
         m_replyCache.clear();
 

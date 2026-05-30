@@ -172,7 +172,10 @@ void PendingRequests::complete(quint32 id, bool ok,
 std::chrono::milliseconds
 PendingRequests::attemptTimeout(const RetryPolicy &p, qint32 attempt) const
 {
-    double t = double(p.timeout.count()) * std::pow(p.backoffFactor, attempt);
+    // Floor the factor at 1.0 (no backoff): a value <= 0 would zero the timeout
+    // into an immediate-retry storm, and < 1 would shrink it nonsensically.
+    const double factor = p.backoffFactor < 1.0 ? 1.0 : p.backoffFactor;
+    double t = double(p.timeout.count()) * std::pow(factor, attempt);
     const double cap = double(p.maxTimeout.count());
     if (t > cap)
         t = cap;

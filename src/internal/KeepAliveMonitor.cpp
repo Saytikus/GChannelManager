@@ -26,6 +26,8 @@ void KeepAliveMonitor::setConfig(const KeepAliveConfig &c)
     const bool wasEnabled  = m_config.enabled;
     const auto oldInterval = m_config.interval;
     m_config = c;
+    if (m_config.maxMissed < 0)
+        m_config.maxMissed = 0;   // a negative bound would trip Suspended on the first beat
 
     if (!c.enabled) {
         m_timer->stop();

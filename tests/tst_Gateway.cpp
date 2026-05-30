@@ -123,6 +123,8 @@ private slots:
     void replyCache_disabled_emitsSignalOnEveryRequest();
     void replyCache_enabled_resendsCachedReplyWithoutEmittingSignal();
     void replyCache_disableClearsExistingEntries();
+    void replyCache_clearedOnSessionRestart_freshRequestNotStale();
+    void config_clampsInvalidValues();
     void startSession_sendsSessionStartFrame();
     void stopSession_sendsSessionStopFrame();
     void incomingSessionStart_acksAndEntersActive();
@@ -444,10 +446,13 @@ void TestGateway::stats_droppedReplyCounted()
     ackSessionStart(t);
     QCOMPARE(gw.sessionState(), Gateway::SessionState::Active);
 
-    // a Reply for a non-existent corrId arrives — it must be counted as droppedReplies
+    // a Reply for a non-existent corrId arrives — counted as droppedReplies and
+    // NOT surfaced as dataReceived (duplicates on a lossy link must not pose as data)
+    QSignalSpy dataSpy(&gw, &Gateway::dataReceived);
     t->simulateReceive(SimpleFrameCodec::makeFrame(SimpleFrameCodec::Reply, 9999,
                                                    QByteArray("orphan")));
     QCOMPARE(gw.stats().droppedReplies, quint64(1));
+    QCOMPARE(dataSpy.count(), 0);
 }
 
 // The periodic statsUpdated signal fires on a timer and stops at interval 0.
@@ -640,6 +645,68 @@ void TestGateway::replyCache_disableClearsExistingEntries()
     t->simulateReceive(SimpleFrameCodec::makeFrame(SimpleFrameCodec::Request, 5,
                                                    QByteArray("CMD")));
     QCOMPARE(reqSpy.count(), 1);   // emitted again — no entry in the cache
+}
+
+// After a session restart the reply cache is cleared, so a peer that restarts
+// its corrIds does not get a stale reply: a *different* request reusing an old
+// corrId must surface via requestReceived, not a silent cached resend.
+void TestGateway::replyCache_clearedOnSessionRestart_freshRequestNotStale()
+{
+    Gateway gw;
+    auto *t = wireUp(gw);
+
+    Gateway::ReplyCacheConfig cc;
+    cc.enabled = true;
+    gw.setReplyCacheConfig(cc);
+
+    gw.enableChannel();
+    gw.startSession();
+    ackSessionStart(t);
+    QCOMPARE(gw.sessionState(), Gateway::SessionState::Active);
+
+    // Session 1: peer asks with corrId=1, we answer -> reply cached at corrId=1.
+    QSignalSpy reqSpy(&gw, &Gateway::requestReceived);
+    t->simulateReceive(SimpleFrameCodec::makeFrame(SimpleFrameCodec::Request, 1,
+                                                   QByteArray("GET /a")));
+    QCOMPARE(reqSpy.count(), 1);
+    QVERIFY(gw.reply(1, QByteArray("REPLY-A")));
+
+    // The session ends and a new one is established (the peer restarts corrIds).
+    t->simulateReceive(SimpleFrameCodec::makeFrame(SimpleFrameCodec::SessionStop, 0, {}));
+    QCOMPARE(gw.sessionState(), Gateway::SessionState::Idle);
+    t->simulateReceive(SimpleFrameCodec::makeFrame(SimpleFrameCodec::SessionStart, 0, {}));
+    QCOMPARE(gw.sessionState(), Gateway::SessionState::Active);
+
+    t->clearSent();
+
+    // Session 2: a DIFFERENT request reuses corrId=1. The cache was cleared, so
+    // the app must see it (not a silent stale resend of REPLY-A).
+    t->simulateReceive(SimpleFrameCodec::makeFrame(SimpleFrameCodec::Request, 1,
+                                                   QByteArray("GET /b")));
+    QCOMPARE(reqSpy.count(), 2);
+    QCOMPARE(reqSpy.last().at(1).toByteArray(), QByteArray("GET /b"));
+    QCOMPARE(gw.stats().cachedRepliesResent, quint64(0));
+}
+
+// Invalid config values are clamped to safe ranges rather than silently
+// breaking the keep-alive / reply-cache machinery.
+void TestGateway::config_clampsInvalidValues()
+{
+    Gateway gw;
+
+    // maxMissed < 0 would trip Suspended on the first heartbeat -> clamp to 0.
+    Gateway::KeepAliveConfig ka;
+    ka.enabled   = true;
+    ka.maxMissed = -5;
+    gw.setKeepAliveConfig(ka);
+    QCOMPARE(gw.keepAliveConfig().maxMissed, 0);
+
+    // maxEntries <= 0 makes QCache store nothing while appearing enabled -> clamp to >= 1.
+    Gateway::ReplyCacheConfig cc;
+    cc.enabled    = true;
+    cc.maxEntries = 0;
+    gw.setReplyCacheConfig(cc);
+    QVERIFY(gw.replyCacheConfig().maxEntries >= 1);
 }
 
 // ---------------------------------------------------------------------

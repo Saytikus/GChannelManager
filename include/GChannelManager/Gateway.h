@@ -52,7 +52,8 @@ public:
         Idle,          // no session
         Establishing,  // SessionStart sent, waiting for SessionStartAck
         Active,        // session established
-        Suspended,     // link temporarily lost (RUDP mode), requests wait
+        Suspended,     // link temporarily lost (RUDP mode); requests are still
+                       // sent and in-flight ones keep retrying — they may time out
         Stopping       // stopping
     };
     Q_ENUM(SessionState)
