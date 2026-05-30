@@ -110,7 +110,7 @@ The documentation lives in [`docs/`](docs/), split by language, and can be read 
 
 - C++20 (GCC 10+, Clang 11+, MSVC 19.29+)
 - CMake ≥ 3.16
-- Qt 6 (`Core`, `Network`); Qt 5 is supported via `find_package(QT NAMES Qt6 Qt5)`
+- Qt 6 (`Core`); Qt 5 is supported via `find_package(QT NAMES Qt6 Qt5)`
 - For the tests — Qt Test (`Qt6::Test`)
 
 ## Project structure

@@ -68,13 +68,13 @@ The main testing tool. It does no I/O but honestly honors the `ITransport` contr
 
 ## What is covered
 
-### `tst_SimpleFrameCodec` (13)
+### `tst_SimpleFrameCodec` (15)
 
 - `encodeRequest_roundtrip` — a `Reply` frame with the same `corrId` parses as `Type::Reply`.
 - `incomingRequestFrame_classifiedAsTypeRequest` — a `Request` frame is classified as `Type::Request`, preserving the `corrId`.
 - `encodeReply_carriesCorrelation` — a `Reply` frame carries the same `corrId` as the request.
 - `encodeData_carriesNoCorrelation` — a `Data` frame, `corrId == 0`, type `Type::Data`.
-- `encodeKeepAlive_classifiedAsKeepAliveReplyOnly` — `KeepAliveReq` → `Unknown`, `KeepAliveReply` → `Type::KeepAlive`.
+- `keepAlive_reqDecodesAsPing_replyDecodesAsKeepAlive` — `KeepAliveReq` → `Type::KeepAlivePing`, `KeepAliveReply` → `Type::KeepAlive`.
 - `encodeSessionStart_classifiedAsType_SessionStart` — a `SessionStart` frame → `Type::SessionStart`.
 - `encodeSessionStartAck_classifiedAsType_SessionStartAck` — a `SessionStartAck` frame → `Type::SessionStartAck`.
 - `encodeSessionStop_classifiedAsType_SessionStop` — a `SessionStop` frame → `Type::SessionStop`.
@@ -83,14 +83,16 @@ The main testing tool. It does no I/O but honestly honors the `ITransport` contr
 - `feed_multipleFrames_inOneBuffer` — three frames in one `feed()` call → three `DecodedMessage`s.
 - `parse_consumesBytesIncrementally` — `parse()` removes what it consumes from the buffer, the "tail" remains.
 - `reset_clearsBuffer` — `reset()` zeros the internal buffer.
+- `feed_oversizedLength_resyncsWithoutOverrun` — a header claiming a huge `len` is rejected (no OOB read / unbounded buffering), the parser resyncs.
+- `feed_corruptedFrame_droppedByCrc` — a flipped payload bit fails the trailing CRC; the frame is dropped, not delivered as valid data.
 
-### `tst_Gateway` (25)
+### `tst_Gateway` (26)
 
 | Group | Cases |
 |---|---|
 | Channel and session states | `channelEnable_emitsStateAndOpensTransport`, `session_reachesActive_afterKeepAliveReply`, `session_keepAliveDisabled_becomesActiveImmediately`, `startSession_sendsSessionStartFrame`, `stopSession_sendsSessionStopFrame`, `incomingSessionStart_acksAndEntersActive`, `incomingSessionStop_failsPendingAndGoesIdle`, `startSession_timeoutFiresWhenAckMissing` |
 | Keep-alive at runtime | `setKeepAliveEnabled_runtimeOff_clearsSuspendedToActive`, `setKeepAliveEnabled_runtimeOn_startsHeartbeat` |
-| Request awaiting a reply | `sendRequest_succeedsOnPeerReply`, `sendRequest_retriesOnTimeout_thenSucceeds`, `sendRequest_failsBeforeChannelEnabled`, `cancel_failsPendingRequest` |
+| Request awaiting a reply | `sendRequest_succeedsOnPeerReply`, `sendRequest_retriesOnTimeout_thenSucceeds`, `sendRequest_synchronousReplyFromSend_completesSafely`, `sendRequest_failsBeforeChannelEnabled`, `cancel_failsPendingRequest` |
 | Fire-and-forget | `send_fireAndForget_emitsDataFrame`, `send_failsWhenSessionInactive` |
 | Server role and reply cache | `incomingRequest_emitsRequestReceived`, `reply_sendsReplyFrameViaTransport`, `replyCache_disabled_emitsSignalOnEveryRequest`, `replyCache_enabled_resendsCachedReplyWithoutEmittingSignal`, `replyCache_disableClearsExistingEntries` |
 | Statistics | `stats_countersTrackKeepAliveAndRequest`, `stats_droppedReplyCounted`, `stats_periodicSignalFires_andStopsOnZeroInterval`, `stats_resetClearsCounters` |

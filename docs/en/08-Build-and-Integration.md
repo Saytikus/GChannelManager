@@ -8,7 +8,7 @@
 |---|---|
 | CMake | 3.16 |
 | Compiler | C++20 (GCC 10+, Clang 11+, MSVC 19.29+) |
-| Qt | 6 (Core, Network); Qt5 supported via `find_package(QT NAMES Qt6 Qt5)` |
+| Qt | 6 (Core); Qt5 supported via `find_package(QT NAMES Qt6 Qt5)` |
 | Build tool | Ninja / Make / MSBuild |
 | Qt Test | only for `GCHANNELMANAGER_BUILD_TESTS=ON` |
 
@@ -64,9 +64,18 @@ The library's `target_include_directories` has a `PUBLIC` scope, so the headers 
 #include <GChannelManager/SimpleFrameCodec.h>
 ```
 
-### Option 2: `find_package` (planned)
+### Option 2: `find_package` (installed package)
 
-Install rules are not written yet. If you need to ship the library as a package — see the [Install roadmap](#install-roadmap) below.
+The library ships install/export rules, so you can install it and consume it with `find_package`:
+
+```cmake
+find_package(GChannelManager REQUIRED)
+
+add_executable(myapp src/main.cpp)
+target_link_libraries(myapp PRIVATE GChannelManager::GChannelManager)
+```
+
+See [Installing](#installing) for how to produce the package.
 
 ## Artifact layout
 
@@ -89,7 +98,7 @@ After building you get:
 #endif
 ```
 
-All exported classes are marked with this macro: `Gateway`, `GatewayRequest`, `ITransport`, `SimpleFrameCodec`, `GChannelManager`. When building the `.so` itself, `GCHANNELMANAGER_LIBRARY` is defined (via `target_compile_definitions(... PRIVATE ...)`); when included from an external project, the macro resolves to `Q_DECL_IMPORT`.
+All exported classes are marked with this macro: `Gateway`, `GatewayRequest`, `ITransport`, `SimpleFrameCodec`. When building the `.so` itself, `GCHANNELMANAGER_LIBRARY` is defined (via `target_compile_definitions(... PRIVATE ...)`); when included from an external project, the macro resolves to `Q_DECL_IMPORT`.
 
 > [!WARNING] Windows
 > On MSVC symbols are **not** exported by default. If you add a new public class — be sure to put `GCHANNELMANAGER_EXPORT` before its name, otherwise it will not be visible from the application using the DLL.
@@ -116,13 +125,28 @@ target_link_libraries(myapp PRIVATE
 )
 ```
 
-## Install roadmap
+## Installing
 
-To turn the library into a full package (`find_package(GChannelManager REQUIRED)`), you need:
+The library installs the versioned `.so`, the public headers, and a CMake
+package (targets + config + version files), so a downstream `find_package`
+works out of the box:
 
-1. `install(TARGETS GChannelManager EXPORT GChannelManagerTargets ...)`
-2. `install(DIRECTORY include/ DESTINATION include)`
-3. Generation of `GChannelManagerConfig.cmake` via `configure_package_config_file()`.
-4. `install(EXPORT GChannelManagerTargets ...)`.
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+cmake --install build --prefix /your/prefix
+```
 
-This is not part of the current minimum, but is described here as the obvious next step.
+This produces, under the prefix:
+
+| Artifact | Location |
+|---|---|
+| `libGChannelManager.so.0.1.0` (+ `.so.0`, `.so` symlinks) | `lib/` |
+| public headers | `include/GChannelManager/` |
+| `GChannelManagerConfig.cmake`, `…ConfigVersion.cmake`, `…Targets.cmake` | `lib/cmake/GChannelManager/` |
+
+Consumers then point CMake at the prefix (`-DCMAKE_PREFIX_PATH=/your/prefix`)
+and use `find_package(GChannelManager REQUIRED)` as shown above. The exported
+target is `GChannelManager::GChannelManager`; its config re-finds `Qt::Core` as
+a dependency. The package version follows the project version
+(`SameMajorVersion` compatibility).

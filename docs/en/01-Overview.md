@@ -58,7 +58,6 @@ A detailed walkthrough is in the [User guide](10-User-Guide.md).
 ## Technologies
 
 - **C++20**, no templates/`concepts` are used — plain modern C++ with `[[nodiscard]]`, `enum class`, `std::unique_ptr`, lambdas and `std::chrono`.
-- **Qt 6 (Core)** — a required dependency (also works with Qt 5 if present).
-- **Qt 6 (Network)** — needed only because of `QHostAddress` in [`UdpConfig`](05-Transport.md#udpconfig); if you don't need UDP you can simply not include that header.
+- **Qt 6 (Core)** — the only required Qt dependency (also works with Qt 5 if present). The core library does **not** pull in QtNetwork: [`UdpConfig`](05-Transport.md#udpconfig) stores addresses as plain strings.
 - **CMake ≥ 3.16**, built with `Ninja`/`Make`/`MSBuild`.
 - **Qt Test** — an optional module (only for running the unit tests).

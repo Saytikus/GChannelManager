@@ -100,13 +100,15 @@ struct SerialConfig {
 
 ```cpp
 struct UdpConfig {
-    QHostAddress localAddress  = QHostAddress::AnyIPv4;
-    quint16      localPort     = 0;       // 0 — any free port
-    QHostAddress remoteAddress;           // destination peer address
-    quint16      remotePort    = 0;
-    bool         bindBeforeSend = true;   // bind the socket on open()
+    QString localAddress   = QStringLiteral("0.0.0.0");  // host/IP as a string
+    quint16 localPort      = 0;            // 0 — any free port
+    QString remoteAddress;                 // destination peer address
+    quint16 remotePort     = 0;
+    bool    bindBeforeSend = true;         // bind the socket on open()
 };
 ```
+
+> Addresses are plain strings (not `QHostAddress`) so the core library does not depend on QtNetwork; a concrete UDP transport parses them on its own side.
 
 > [!NOTE]
 > The `SerialTransport` and `UdpTransport` implementations themselves **are not part** of the library: they must be written for your Qt stack (`QtSerialPort`, `QtNetwork`). The structures above are only data definitions, so that the contract stays "light" and does not pull in those modules as dependencies.

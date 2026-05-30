@@ -20,6 +20,7 @@ public:
     [[nodiscard]] virtual QByteArray encodeSessionStartAck() = 0;
     [[nodiscard]] virtual QByteArray encodeSessionStop()     = 0;
     [[nodiscard]] virtual QByteArray encodeKeepAlive()       = 0;
+    [[nodiscard]] virtual QByteArray encodeKeepAliveReply()  = 0;
     [[nodiscard]] virtual std::vector<DecodedMessage> feed(const QByteArray &bytes) = 0;
     virtual void reset() {}
 };
@@ -33,7 +34,8 @@ public:
 | `encodeSessionStart()` | on `startSession()` | a session-initiation frame |
 | `encodeSessionStartAck()` | on receiving SessionStart from the peer | a session-acknowledgement frame |
 | `encodeSessionStop()` | on `stopSession()` | a session-termination frame |
-| `encodeKeepAlive()` | on the keep-alive timer (only in `Active`) | a heartbeat frame |
+| `encodeKeepAlive()` | on the keep-alive timer (only in `Active`) | a heartbeat request frame |
+| `encodeKeepAliveReply()` | on an incoming `KeepAlivePing` | a heartbeat reply frame (the pong) |
 | `feed(bytes)` | on every `bytesReceived` | a list of decoded messages |
 | `reset()` | on `startSession()` and on an incoming `SessionStart` | clear the internal buffer |
 
@@ -49,7 +51,8 @@ struct DecodedMessage {
         SessionStart,     // peer opens a session
         SessionStartAck,  // peer acknowledged our SessionStart
         SessionStop,      // peer closes a session
-        KeepAlive,        // keep-alive (link liveness confirmation)
+        KeepAlivePing,    // keep-alive request from the peer → Gateway auto-answers
+        KeepAlive,        // keep-alive reply (link liveness confirmation)
         Data,             // data without correlation (push from the peer)
         Unknown           // unrecognized / service
     };
@@ -71,6 +74,7 @@ flowchart LR
     Loop -->|SessionStart| SS["send SessionStartAck<br/>→ Active"]
     Loop -->|SessionStartAck| Ack["Establishing → Active"]
     Loop -->|SessionStop| Stop["fail pending<br/>→ Idle"]
+    Loop -->|KeepAlivePing| Pong["send KeepAliveReply"]
     Loop -->|KeepAlive| Live["m_missedKeepAlives=0<br/>Suspended → Active"]
     Loop -->|Data| Push["dataReceived++<br/>emit dataReceived"]
     Loop -->|Unknown| Skip["nothing"]
@@ -85,16 +89,20 @@ flowchart LR
 
 ### Frame format
 
-Little-endian, a fixed 10-byte header:
+Little-endian, a fixed 10-byte header and a 2-byte trailing CRC:
 
 ```
- 0       1       2  3  4  5    6  7  8  9    10 ............
-┌───────┬───────┬─────────────┬─────────────┬──────────────────┐
-│ magic │ type  │   corrId    │     len     │     payload      │
-│ 0xA5  │ u8    │   u32 LE    │   u32 LE    │   len bytes      │
-└───────┴───────┴─────────────┴─────────────┴──────────────────┘
-   1       1          4             4          variable
+ 0       1       2  3  4  5    6  7  8  9    10 ........    .. ..
+┌───────┬───────┬─────────────┬─────────────┬──────────────┬───────┐
+│ magic │ type  │   corrId    │     len     │   payload    │ crc16 │
+│ 0xA5  │ u8    │   u32 LE    │   u32 LE    │   len bytes   │ u16 LE│
+└───────┴───────┴─────────────┴─────────────┴──────────────┴───────┘
+   1       1          4             4          variable        2
 ```
+
+`crc16` is CRC-16/CCITT-FALSE over everything from `magic` through the end of
+`payload`. `len` is capped at `SimpleFrameCodec::kMaxPayloadSize` (16 MiB); a
+header claiming more is treated as line noise.
 
 `type` values:
 
@@ -102,8 +110,8 @@ Little-endian, a fixed 10-byte header:
 |---|---|---|---|
 | `Request`         | 1 | `encodeRequest(corrId, payload)`         | `Request` |
 | `Reply`           | 2 | `encodeReply(corrId, payload)`           | `Reply` |
-| `KeepAliveReq`    | 3 | `encodeKeepAlive()`                      | `Unknown` (peer replies with `KeepAliveReply`) |
-| `KeepAliveReply`  | 4 | (the peer sends it in reply)             | `KeepAlive` |
+| `KeepAliveReq`    | 3 | `encodeKeepAlive()`                      | `KeepAlivePing` (Gateway answers with `KeepAliveReply`) |
+| `KeepAliveReply`  | 4 | `encodeKeepAliveReply()` (answer to a ping) | `KeepAlive` |
 | `Data`            | 5 | `encodeData(payload)` (fire-and-forget)  | `Data` |
 | `SessionStart`    | 6 | `encodeSessionStart()` on `startSession()` | `SessionStart` |
 | `SessionStartAck` | 7 | `encodeSessionStartAck()` in reply       | `SessionStartAck` |
@@ -112,9 +120,9 @@ Little-endian, a fixed 10-byte header:
 > [!NOTE]
 > `corrId == 0` is reserved for keep-alive and fire-and-forget. Real `Request` frames get `corrId ≥ 1`.
 
-### Resynchronization by `magic`
+### Resynchronization and integrity
 
-If there is no `0xA5` at the start of the buffer, the parser shifts by one byte and looks for the magic again. This allows recovery from garbage on the line without a full buffer reset.
+If there is no `0xA5` at the start of the buffer, the parser shifts by one byte and looks for the magic again. A frame whose trailing CRC does not match (a flipped bit, or a `0xA5` that was not really a frame start) is likewise dropped and the parser resynchronizes — so corruption on the line cannot be delivered as valid data or desync the stream permanently.
 
 ### Utility API
 
@@ -129,7 +137,7 @@ static std::vector<RawFrame> parse(QByteArray &buffer);   // consumes what it pa
 
 ## Writing your own codec
 
-The minimum is to implement the four `encode*`/`feed` methods (`reset` is optional):
+You must implement every pure-virtual `encode*`/`feed` method (`reset` is optional); a few are shown here:
 
 ```cpp
 class MyProtocolCodec : public IMessageCodec {
@@ -142,6 +150,9 @@ public:
     }
     QByteArray encodeKeepAlive() override {
         return makeFrame(MY_HEARTBEAT, 0, {});
+    }
+    QByteArray encodeKeepAliveReply() override {
+        return makeFrame(MY_HEARTBEAT_ACK, 0, {});   // answer to a peer's ping
     }
     std::vector<DecodedMessage> feed(const QByteArray &bytes) override {
         m_buf.append(bytes);

@@ -94,11 +94,11 @@ GChannelManager/
 ├── src/                             ← implementations (compiled into .so/.dll)
 │   ├── Gateway.cpp
 │   ├── SimpleFrameCodec.cpp
-│   ├── GChannelManager.cpp
 │   └── internal/                    ← Gateway collaborators (gcm::internal::)
 │       ├── PendingRequests.h/.cpp
 │       ├── KeepAliveMonitor.h/.cpp
-│       └── SessionHandshake.h/.cpp
+│       ├── SessionHandshake.h/.cpp
+│       └── TimerMs.h                ← QTimer ms-clamp helper
 ├── examples/                        ← optional: GCHANNELMANAGER_BUILD_EXAMPLES=ON
 │   ├── demo_peer.cpp                ← demo with a loopback transport
 │   └── CMakeLists.txt

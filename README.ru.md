@@ -108,7 +108,7 @@ gw.enableChannel();   // дальше всё событийно
 
 - C++20 (GCC 10+, Clang 11+, MSVC 19.29+)
 - CMake ≥ 3.16
-- Qt 6 (`Core`, `Network`); Qt 5 поддерживается через `find_package(QT NAMES Qt6 Qt5)`
+- Qt 6 (`Core`); Qt 5 поддерживается через `find_package(QT NAMES Qt6 Qt5)`
 - Для тестов — Qt Test (`Qt6::Test`)
 
 ## Структура проекта
